@@ -1,0 +1,5 @@
+.idea
+.vscode
+*.log
+bin
+__debug_bin.exe
