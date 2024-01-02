@@ -16,6 +16,9 @@ import (
 
 const CtxKey_nolog = utils.CtxKey_nolog // 不打印日志，错误日志还会打印 值：不受限制 一般写1
 
+const CtxKey_caller = utils.CtxKey("caller")   // 值：CallerDesc对象 一般情况内部使用
+const CtxKey_cmddesc = utils.CtxKey("cmddesc") // 值：字符串 命令描述 一般情况内部使用
+
 type Config struct {
 	Addr          string `json:"addr,omitempty"` //地址,host:port
 	Passwd        string `json:"passwd,omitempty"`
@@ -124,7 +127,7 @@ func (r *Redis) do(ctx context.Context, cmd string, args ...interface{}) *RedisC
 		Args: args,
 	}
 	if ctx != nil {
-		caller := ctx.Value("caller")
+		caller := ctx.Value(CtxKey_caller)
 		if caller != nil {
 			redisCmd.Caller, _ = caller.(*utils.CallerDesc)
 		}
@@ -144,7 +147,7 @@ func (r *Redis) docmd(ctx context.Context, redisCmd *RedisCommond) {
 	}
 
 	if len(redisCmd.CmdDesc) == 0 && ctx != nil {
-		cmddesc := ctx.Value("cmddesc")
+		cmddesc := ctx.Value(CtxKey_cmddesc)
 		if cmddesc != nil {
 			redisCmd.CmdDesc, _ = cmddesc.(string)
 		}
@@ -157,7 +160,7 @@ func (r *Redis) docmd(ctx context.Context, redisCmd *RedisCommond) {
 	redisCmd.Elapsed = time.Since(entry)
 
 	if redisCmd.Err != nil {
-		log.Error().Err(redisCmd.Err).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Msg("Redis cmd fail")
@@ -170,7 +173,7 @@ func (r *Redis) docmd(ctx context.Context, redisCmd *RedisCommond) {
 			}
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 				Str("cmd", redisCmd.CmdString()).
 				Str("pos", redisCmd.Caller.Pos()).
 				Str("reply", redisCmd.ReplyString()).
@@ -192,7 +195,7 @@ func (r *Redis) DoCmdInt(ctx context.Context, cmd string, args ...interface{}) (
 	}
 	result, redisCmd.Err = redis.Int(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -209,7 +212,7 @@ func (r *Redis) DoCmdInt64(ctx context.Context, cmd string, args ...interface{})
 	}
 	result, redisCmd.Err = redis.Int64(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -226,7 +229,7 @@ func (r *Redis) DoCmdUint64(ctx context.Context, cmd string, args ...interface{}
 	}
 	result, redisCmd.Err = redis.Uint64(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -243,7 +246,7 @@ func (r *Redis) DoCmdFloat64(ctx context.Context, cmd string, args ...interface{
 	}
 	result, redisCmd.Err = redis.Float64(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -260,7 +263,7 @@ func (r *Redis) DoCmdString(ctx context.Context, cmd string, args ...interface{}
 	}
 	result, redisCmd.Err = redis.String(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -277,7 +280,7 @@ func (r *Redis) DoCmdBytes(ctx context.Context, cmd string, args ...interface{})
 	}
 	result, redisCmd.Err = redis.Bytes(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -294,7 +297,7 @@ func (r *Redis) DoCmdBool(ctx context.Context, cmd string, args ...interface{}) 
 	}
 	result, redisCmd.Err = redis.Bool(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -311,7 +314,7 @@ func (r *Redis) DoCmdFloat64s(ctx context.Context, cmd string, args ...interface
 	}
 	result, redisCmd.Err = redis.Float64s(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -328,7 +331,7 @@ func (r *Redis) DoCmdStrings(ctx context.Context, cmd string, args ...interface{
 	}
 	result, redisCmd.Err = redis.Strings(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -345,7 +348,7 @@ func (r *Redis) DoCmdByteSlices(ctx context.Context, cmd string, args ...interfa
 	}
 	result, redisCmd.Err = redis.ByteSlices(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -362,7 +365,7 @@ func (r *Redis) DoCmdInt64s(ctx context.Context, cmd string, args ...interface{}
 	}
 	result, redisCmd.Err = redis.Int64s(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -379,7 +382,7 @@ func (r *Redis) DoCmdInts(ctx context.Context, cmd string, args ...interface{}) 
 	}
 	result, redisCmd.Err = redis.Ints(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -396,7 +399,7 @@ func (r *Redis) DoCmdStringMap(ctx context.Context, cmd string, args ...interfac
 	}
 	result, redisCmd.Err = redis.StringMap(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -413,7 +416,7 @@ func (r *Redis) DoCmdIntMap(ctx context.Context, cmd string, args ...interface{}
 	}
 	result, redisCmd.Err = redis.IntMap(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -430,7 +433,7 @@ func (r *Redis) DoCmdInt64Map(ctx context.Context, cmd string, args ...interface
 	}
 	result, redisCmd.Err = redis.Int64Map(redisCmd.Reply, redisCmd.Err)
 	if redisCmd.Err != nil && redisCmd.Err != redis.ErrNil {
-		log.Error().Err(redisCmd.Err).
+		utils.LogCtx(log.Error(), ctx).Err(redisCmd.Err).
 			Str("cmd", redisCmd.CmdString()).
 			Str("pos", redisCmd.Caller.Pos()).
 			Str("reply", redisCmd.ReplyString()).
@@ -439,7 +442,12 @@ func (r *Redis) DoCmdInt64Map(ctx context.Context, cmd string, args ...interface
 	return result, redisCmd.Err
 }
 
-// 参数v 参考RedisResultBind.HMGetBindObj的说明
+// 针对HMGET命令 调用Cmd时，参数不需要包括field
+// 结构成员首字母需要大写，tag中必须是包含 `redis:"hello"`  其中hello就表示在redis中存储的field名称
+// 结构成员类型 : Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32, Float64, String, []byte
+// 结构成员其他类型 : 通过Json转化
+// 传入的参数为结构的地址
+// 参数组织调用 hmsetObjArgs hmgetObjArgs
 func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 	redisCmd := &RedisCommond{
 		Cmd:    "HMGET",
@@ -447,35 +455,35 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 	}
 	// 组织参数
 	redisCmd.Args = append(redisCmd.Args, key)
-	err := redisCmd.HMGetBindObj(v)
+	fargs, elemts, structtype, err := hmgetObjArgs(v)
 	if err != nil {
+		utils.LogCtx(log.Error(), ctx).Err(err).Str("pos", redisCmd.Caller.Pos()).Msg("Redis HMGetObj Param error")
 		return err
 	}
+	redisCmd.Args = append(redisCmd.Args, fargs...)
 
 	r.docmd(ctx, redisCmd)
 	if redisCmd.Err != nil {
 		return redisCmd.Err
 	}
 	// 回调
-	redisCmd.Err = redisCmd.callback(redisCmd.Reply)
-	if err != nil {
-		log.Error().Err(redisCmd.Err).Str("cmd", redisCmd.CmdString()).Str("pos", redisCmd.Caller.Pos()).Msg("Redis HMGetObj Bind Error")
-	}
+	redisCmd.Err = redisCmd.hmgetCallback(elemts, structtype)
 	return redisCmd.Err
 }
 
-// 参数v 参考RedisResultBind.HMGetBindObj的说明
+// 参数v 参考Redis.HMGetObj
 func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 	redisCmd := &RedisCommond{
 		Cmd:    "HMSET",
 		Caller: utils.GetCallerDesc(1),
 	}
 	redisCmd.Args = append(redisCmd.Args, key)
-	redisCmd.Err = redisCmd._HMSetObjArgs(v)
-	if redisCmd.Err != nil {
-		log.Error().Str("cmd", redisCmd.CmdString()).Str("pos", redisCmd.Caller.Pos()).Msg("Redis HMSetObj Param error")
-		return redisCmd.Err
+	fargs, err := hmsetObjArgs(v)
+	if err != nil {
+		utils.LogCtx(log.Error(), ctx).Err(err).Str("cmd", redisCmd.CmdString()).Str("pos", redisCmd.Caller.Pos()).Msg("Redis HMSetObj Param error")
+		return err
 	}
+	redisCmd.Args = append(redisCmd.Args, fargs...)
 
 	r.docmd(ctx, redisCmd)
 	return redisCmd.Err

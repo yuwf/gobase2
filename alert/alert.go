@@ -21,21 +21,20 @@ var (
 	errorLogPrefixLock sync.RWMutex
 	// 报警日志 Msg前缀部分
 	errorLogPrefix = map[string]interface{}{
-		"Panic":                nil,
-		"Consul":               nil,
-		"Redis":                nil,
-		"MySQL":                nil,
-		"RandParamErr":         nil,
-		"GinServer RegHandler": nil,
+		"Panic":               nil,
+		"Consul":              nil,
+		"Redis":               nil,
+		"MySQL":               nil,
+		"RandParamErr":        nil,
+		"HttpRequest Err":     nil,
+		"HttpRequest TimeOut": nil,
 	}
-	// 报警日志 Msg前缀部分
-	// 一个错误多个节点可能都会报警 会先调用 LogAlertCheck 判断是否报警节点
-	// 外部可重新 LogAlertCheck 函数
+	// 单一节点报警，一个错误多个节点可能都会报警 会先调用 LogAlertCheck 判断是否报警节点
 	errorLogPrefix2 = map[string]interface{}{
 		"JsonLoader": nil,
 		"StrLoader":  nil,
 	}
-	// 检查报警函数，外部可赋值重定义
+	// 单一节点报警，检查报警函数，外部可赋值重定义
 	LogAlertCheck = func(prefix string) bool {
 		return true
 	}
@@ -51,8 +50,8 @@ func InitAlert() func(sendAlert bool) {
 	hook.bootChecking = true
 	// 开启超时关闭检查
 	go func() {
-		ticker := time.Tick(15 * time.Second)
-		<-ticker
+		timer := time.NewTimer(15 * time.Second)
+		<-timer.C
 		hook.bootChecking = false
 	}()
 	// 外层回调
@@ -98,7 +97,7 @@ func checkSendAlert(msg string) bool {
 	defer errorLogPrefixLock.RUnlock()
 
 	alert := false
-	for k, _ := range errorLogPrefix2 {
+	for k := range errorLogPrefix2 {
 		l := len(k)
 		if len(msg) >= l && msg[0:l] == k {
 			if LogAlertCheck != nil && LogAlertCheck(k) {
@@ -108,7 +107,7 @@ func checkSendAlert(msg string) bool {
 		}
 	}
 	if !alert {
-		for k, _ := range errorLogPrefix {
+		for k := range errorLogPrefix {
 			l := len(k)
 			if len(msg) >= l && msg[0:l] == k {
 				alert = true

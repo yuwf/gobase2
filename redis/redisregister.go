@@ -1,5 +1,7 @@
 package redis
 
+// https://github.com/yuwf/gobase2
+
 import (
 	"context"
 	"errors"
@@ -14,8 +16,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
-
-// https://github.com/yuwf/gobase2
 
 // 使用Redis做服务器注册和发现使用
 
@@ -283,8 +283,8 @@ func (r *Register) loop() {
 }
 
 func (r *Register) zadd() error {
-	ctx := context.WithValue(r.ctx, "cmddesc", "Register")
-	ctx = context.WithValue(ctx, "caller", utils.GetCallerDesc(1))
+	ctx := context.WithValue(r.ctx, CtxKey_cmddesc, "Register")
+	ctx = context.WithValue(ctx, CtxKey_caller, utils.GetCallerDesc(1))
 	listKey := fmt.Sprintf(regListFmt, r.key)    // 服务器列表
 	channel := fmt.Sprintf(regChannelFmt, r.key) // 广播channel
 	args := []interface{}{r.key, listKey, RegExprieTime * 1000, channel}
@@ -300,8 +300,8 @@ func (r *Register) zadd() error {
 }
 
 func (r *Register) zrem() error {
-	ctx := context.WithValue(r.ctx, "cmddesc", "Register")
-	ctx = context.WithValue(ctx, "caller", utils.GetCallerDesc(1))
+	ctx := context.WithValue(r.ctx, CtxKey_cmddesc, "Register")
+	ctx = context.WithValue(ctx, CtxKey_caller, utils.GetCallerDesc(1))
 	listKey := fmt.Sprintf(regListFmt, r.key)    // 服务器列表
 	channel := fmt.Sprintf(regChannelFmt, r.key) // 广播channel
 	args := []interface{}{r.key, listKey, RegExprieTime * 1000, channel}

@@ -219,18 +219,18 @@ func (c *RedisCommond) Bind(v interface{}) error {
 	// 参数检查
 	vo := reflect.ValueOf(v)
 	if vo.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Pointer")
+		err := errors.New("bind param kind must be pointer")
 		log.Error().Err(err).Str("pos", c.Caller.Pos()).Msg("RedisResult Bind fail")
 		return err
 	}
 	if vo.IsNil() {
-		err := errors.New("Bind Pointer is nil")
+		err := errors.New("bind param pointer is nil")
 		log.Error().Err(err).Str("pos", c.Caller.Pos()).Msg("RedisResult Bind fail")
 		return err
 	}
 	elem := vo.Elem()
 	if !elem.CanSet() {
-		err := errors.New("Param Kind must be CanSet")
+		err := errors.New("bind param kind must be canset")
 		log.Error().Err(err).Str("pos", c.Caller.Pos()).Msg("RedisResult Bind fail")
 		return err
 	}
@@ -248,13 +248,13 @@ func (c *RedisCommond) Bind(v interface{}) error {
 		elem.SetString("")
 	case reflect.Slice:
 		if elem.Type().Elem().Kind() != reflect.Uint8 {
-			err := errors.New("SliceElem Kind must be Uint8(byte)")
+			err := errors.New("sliceelem kind must be Uint8(byte)")
 			log.Error().Err(err).Str("pos", c.Caller.Pos()).Msg("RedisResult Bind fail")
 			return err
 		}
 		elem.SetBytes([]byte{})
 	default:
-		err := errors.New("Param not support " + fmt.Sprint(elem.Type()))
+		err := errors.New("param not support " + fmt.Sprint(elem.Type()))
 		log.Error().Err(err).Str("pos", c.Caller.Pos()).Msg("RedisResult Bind fail")
 		return err
 	}
@@ -302,12 +302,12 @@ func (c *RedisCommond) BindSlice(v interface{}) error {
 	// 参数检查
 	vt := reflect.TypeOf(v)
 	if vt.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Slice Pointer")
+		err := errors.New("bind param kind must be slice Pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindSlice fail")
 		return err
 	}
 	if vt.Elem().Kind() != reflect.Slice {
-		err := errors.New("Bind Param Kind must be Slice Pointer")
+		err := errors.New("bind param kind must be slice Pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindSlice fail")
 		return err
 	}
@@ -392,12 +392,12 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 	// 参数检查
 	vt := reflect.TypeOf(v)
 	if vt.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Map Pointer")
+		err := errors.New("bind param kind must be map pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindMap fail")
 		return err
 	}
 	if vt.Elem().Kind() != reflect.Map {
-		err := errors.New("Bind Param Kind must be Map Pointer")
+		err := errors.New("bind param kind must be map pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindMap fail")
 		return err
 	}
@@ -463,16 +463,6 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 	return nil
 }
 
-func (c *RedisCommond) HMGetBindObj(v interface{}) error {
-	// 参数检查
-	_, elemts, structtype, err := hmgetObjArgs(nil, v)
-	if err != nil {
-		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult HMGetBindObj fail")
-		return err
-	}
-	return c.hmgetCallback(elemts, structtype)
-}
-
 func (c *RedisCommond) hmgetCallback(elemts []reflect.Value, structtype reflect.Type) error {
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
@@ -520,7 +510,7 @@ func (c *RedisCommond) hmgetCallback(elemts []reflect.Value, structtype reflect.
 		}
 		err := c.callback(cmd.Val())
 		if err != nil {
-			log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult HMGetBindObj fail")
+			log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult HMGetObj fail")
 			return err
 		}
 	}
@@ -535,21 +525,22 @@ type Test struct {
 }
 上面的对象写入args中的格式为  "f1" "f2"
 */
-func hmgetObjArgs(args []interface{}, v interface{}) ([]interface{}, []reflect.Value, reflect.Type, error) {
+func hmgetObjArgs(v interface{}) ([]interface{}, []reflect.Value, reflect.Type, error) {
+	var args []interface{}
 	// 参数检查
 	vo := reflect.ValueOf(v)
 	if vo.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Pointer")
+		err := errors.New("bind param kind must be pointer")
 		return args, nil, nil, err
 	}
 	if vo.IsNil() {
-		err := errors.New("Bind Param Pointer is nil")
+		err := errors.New("bind param pointer is nil")
 		return args, nil, nil, err
 	}
 	structtype := vo.Elem().Type() // 第一层是指针，第二层是结构
 	structvalue := vo.Elem()
 	if structtype.Kind() != reflect.Struct {
-		err := errors.New("Bind Param Kind must be Struct")
+		err := errors.New("bind param kind must be struct")
 		return args, nil, nil, err
 	}
 
@@ -569,7 +560,7 @@ func hmgetObjArgs(args []interface{}, v interface{}) ([]interface{}, []reflect.V
 		}
 	}
 	if len(args) == argsNum {
-		err := errors.New("StructMem invalid")
+		err := errors.New("structmem invalid")
 		return args, nil, nil, err
 	}
 	return args, elemts, structtype, nil
@@ -583,19 +574,20 @@ type Test struct {
 }
 上面的对象写入args中的格式为  "f1" F1 "f2" F2
 */
-func hmsetObjArgs(args []interface{}, v interface{}) ([]interface{}, error) {
+func hmsetObjArgs(v interface{}) ([]interface{}, error) {
+	var args []interface{}
 	// 验证参数
 	vo := reflect.ValueOf(v)
 	if vo.Kind() != reflect.Ptr {
-		return args, errors.New("Param Kind must be Pointer")
+		return args, errors.New("param kind must be pointer")
 	}
 	if vo.IsNil() {
-		return args, errors.New("Param Pointer is nil")
+		return args, errors.New("param pointer is nil")
 	}
 	structtype := vo.Elem().Type() // 第一层是指针，第二层是结构
 	structvalue := vo.Elem()
 	if structtype.Kind() != reflect.Struct {
-		return args, errors.New("Param Kind must be Struct")
+		return args, errors.New("param kind must be struct")
 	}
 
 	argsNum := len(args) // 先记录下进来时的参数个数
@@ -623,17 +615,28 @@ func hmsetObjArgs(args []interface{}, v interface{}) ([]interface{}, error) {
 			args = append(args, tag)
 			args = append(args, v.Interface())
 		case reflect.Slice:
-			if v.Type().Elem().Kind() != reflect.Uint8 {
-				return args, errors.New("SliceElem Kind must be Uint8(byte)")
+			if v.Type().Elem().Kind() == reflect.Uint8 {
+				args = append(args, tag)
+				args = append(args, v.Interface())
+				break
 			}
-			args = append(args, tag)
-			args = append(args, v.Interface())
+			fallthrough
 		default:
-			return args, errors.New("Param not support " + fmt.Sprint(v.Type()))
+			if v.CanInterface() {
+				data, err := json.Marshal(v.Interface())
+				if err != nil {
+					return args, err
+				}
+				args = append(args, tag)
+				args = append(args, data)
+				break
+			}
+			// 对象转化成json
+			return args, errors.New("param not support " + fmt.Sprint(v.Type()))
 		}
 	}
 	if len(args) == argsNum {
-		return args, errors.New("StructMem invalid")
+		return args, errors.New("structmem invalid")
 	}
 	return args, nil
 }
@@ -642,18 +645,18 @@ func (c *RedisCommond) BindJsonObj(v interface{}) error {
 	// 参数检查
 	vo := reflect.ValueOf(v)
 	if vo.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Pointer")
+		err := errors.New("bind param kind must be pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObj fail")
 		return err
 	}
 	if vo.IsNil() {
-		err := errors.New("Bind Param Pointer is nil")
+		err := errors.New("bind param pointer is nil")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObj fail")
 		return err
 	}
 	structtype := vo.Elem().Type() // 第一层是指针，第二层是结构
 	if structtype.Kind() != reflect.Struct {
-		err := errors.New("Bind Param Kind must be Struct")
+		err := errors.New("bind param kind must be struct")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObj fail")
 		return err
 	}
@@ -701,12 +704,12 @@ func (c *RedisCommond) BindJsonObjSlice(v interface{}) error {
 	// 参数检查
 	vt := reflect.TypeOf(v)
 	if vt.Kind() != reflect.Ptr {
-		err := errors.New("Bind Param Kind must be Pointer")
+		err := errors.New("bind param kind must be pointer")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObjSlice fail")
 		return err
 	}
 	if vt.Elem().Kind() != reflect.Slice {
-		err := errors.New("Bind Param Kind must be Slice")
+		err := errors.New("bind param kind must be slice")
 		log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObjSlice fail")
 		return err
 	}
@@ -714,12 +717,12 @@ func (c *RedisCommond) BindJsonObjSlice(v interface{}) error {
 	if elemtype.Kind() == reflect.Pointer {
 		// 元素是指针，指针指向的类型必须是结构
 		if elemtype.Elem().Kind() != reflect.Struct {
-			err := errors.New("Bind Param Elem Kind must be Struct or *Struct")
-			log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisPipeline BindJsonObjSlice Bind Param Kind must be Struct or *Struct")
+			err := errors.New("bind param elem kind must be struct or *struct")
+			log.Error().Err(err).Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisPipeline BindJsonObjSlice bind param kind must be struct or *Struct")
 			return err
 		}
 	} else if elemtype.Kind() != reflect.Struct {
-		err := errors.New("Bind Param Elem Kind must be Struct or *Struct")
+		err := errors.New("bind param elem kind must be struct or *struct")
 		log.Error().Str("cmd", c.CmdString()).Str("pos", c.Caller.Pos()).Msg("RedisResult BindJsonObjSlice fail")
 		return err
 	}
@@ -830,35 +833,56 @@ func stringHelper(r string, v reflect.Value) error {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(r)
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetBool(b)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n, err := strconv.ParseInt(r, 10, 0)
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetInt(n)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		n, err := strconv.ParseUint(r, 10, 0)
 		if err != nil {
-			return errors.New("Parse:" + err.Error())
+			return errors.New("parse:" + err.Error())
 		}
 		v.SetUint(n)
 	case reflect.Float32, reflect.Float64:
-		n, err := strconv.ParseFloat(r, 0)
+		n, err := strconv.ParseFloat(r, 64)
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetFloat(n)
 	case reflect.String:
 		v.SetString(r)
-	case reflect.Slice: // 用[]byte接受返回值
-		if v.Type().Elem().Kind() != reflect.Uint8 {
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(r), r, v.Type())
+	case reflect.Slice:
+		// 接受类型是否[]byte
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			v.SetBytes([]byte(r))
+			break
 		}
-		v.SetBytes([]byte(r))
+		fallthrough
 	default:
+		// 其他对象向json上转化
+		if v.Kind() == reflect.Pointer {
+			if v.CanInterface() && v.CanSet() {
+				v.Set(reflect.New(v.Type().Elem()))
+				err := json.Unmarshal([]byte(r), v.Interface())
+				if err != nil {
+					return err
+				}
+				break
+			}
+		} else {
+			if v.Addr().CanInterface() {
+				err := json.Unmarshal([]byte(r), v.Addr().Interface())
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
 		return fmt.Errorf(typeErrFmt, reflect.TypeOf(r), r, v.Type())
 	}
 	return nil
@@ -869,35 +893,56 @@ func bytesHelper(r []byte, v reflect.Value) error {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(string(r))
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetBool(b)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n, err := strconv.ParseInt(string(r), 10, 0)
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetInt(n)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		n, err := strconv.ParseUint(string(r), 10, 0)
 		if err != nil {
-			return errors.New("Parse:" + err.Error())
+			return errors.New("parse:" + err.Error())
 		}
 		v.SetUint(n)
 	case reflect.Float32, reflect.Float64:
-		n, err := strconv.ParseFloat(string(r), 0)
+		n, err := strconv.ParseFloat(string(r), 64)
 		if err != nil {
-			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " Parse:" + err.Error())
+			return errors.New(fmt.Sprintf(typeErrFmt, reflect.TypeOf(r), r, v.Type()) + " parse:" + err.Error())
 		}
 		v.SetFloat(n)
 	case reflect.String:
 		v.SetString(string(r))
-	case reflect.Slice: // 用[]byte接受返回值
-		if v.Type().Elem().Kind() != reflect.Uint8 {
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(r), r, v.Type())
+	case reflect.Slice:
+		// 接受类型是否[]byte
+		if v.Type().Elem().Kind() == reflect.Uint8 {
+			v.SetBytes(r)
+			break
 		}
-		v.SetBytes(r)
+		fallthrough
 	default:
+		// 其他对象向json上转化
+		if v.Kind() == reflect.Pointer {
+			if v.CanInterface() && v.CanSet() {
+				v.Set(reflect.New(v.Type().Elem()))
+				err := json.Unmarshal(r, v.Interface())
+				if err != nil {
+					return err
+				}
+				break
+			}
+		} else {
+			if v.Addr().CanInterface() {
+				err := json.Unmarshal(r, v.Addr().Interface())
+				if err != nil {
+					return err
+				}
+				break
+			}
+		}
 		return fmt.Errorf(typeErrFmt, reflect.TypeOf(r), r, v.Type())
 	}
 	return nil

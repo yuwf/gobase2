@@ -1,7 +1,10 @@
 package metrics
 
+// https://github.com/yuwf/gobase2
+
 import (
 	"gobase/backend"
+	"gobase/dispatch"
 	"gobase/ginserver"
 	"gobase/gnetserver"
 	"gobase/goredis"
@@ -9,6 +12,7 @@ import (
 	"gobase/mysql"
 	"gobase/redis"
 	"gobase/tcpserver"
+	"gobase/utils"
 )
 
 // 注册各种组件的hook，实现统计
@@ -74,5 +78,12 @@ func RegTCPBackend[ServerInfo any](tb *backend.TcpBackend[ServerInfo]) {
 func RegHttpBackend[ServerInfo any](hb *backend.HttpBackend[ServerInfo]) {
 	if hb != nil {
 		hb.RegHook(&httpBackendHook[ServerInfo]{})
+	}
+}
+
+// MsgDispatch统计
+func RegMsgDispatch[Mr utils.RecvMsger, Cr any](md *dispatch.MsgDispatch[Mr, Cr]) {
+	if md != nil {
+		md.RegHook(msgDispatchHook)
 	}
 }

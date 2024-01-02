@@ -1,5 +1,7 @@
 package mysql
 
+// https://github.com/yuwf/gobase2
+
 import (
 	"context"
 	"database/sql"
@@ -113,7 +115,7 @@ func (m *MySQL) Get(ctx context.Context, dest interface{}, query string, args ..
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil && mysqlCmd.Err != sql.ErrNoRows {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("query", query).Interface("args", args).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQL Get fail")
@@ -123,7 +125,7 @@ func (m *MySQL) Get(ctx context.Context, dest interface{}, query string, args ..
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("query", query).Interface("args", args).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Interface("dest", dest).
@@ -150,7 +152,7 @@ func (m *MySQL) Select(ctx context.Context, dest interface{}, query string, args
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("query", query).Interface("args", args).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQL Select fail")
@@ -160,7 +162,7 @@ func (m *MySQL) Select(ctx context.Context, dest interface{}, query string, args
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("query", query).Interface("args", args).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Interface("dest", dest).
@@ -188,7 +190,7 @@ func (m *MySQL) Exec(ctx context.Context, query string, args ...interface{}) (sq
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("query", query).Interface("args", args).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQL Exec fail")
@@ -198,7 +200,7 @@ func (m *MySQL) Exec(ctx context.Context, query string, args ...interface{}) (sq
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("query", query).Interface("args", args).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Msg("MySQL Exec success")
@@ -225,7 +227,7 @@ func (m *MySQL) Update(ctx context.Context, query string, args ...interface{}) (
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("query", query).Interface("args", args).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQL Update fail")
@@ -235,7 +237,7 @@ func (m *MySQL) Update(ctx context.Context, query string, args ...interface{}) (
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("query", query).Interface("args", args).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Msg("MySQL Update success")
@@ -278,7 +280,7 @@ func (mt *MySQLTx) Exec(ctx context.Context, query string, args ...interface{}) 
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("query", query).Interface("args", args).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQLTx Exec fail")
@@ -288,7 +290,7 @@ func (mt *MySQLTx) Exec(ctx context.Context, query string, args ...interface{}) 
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("query", query).Interface("args", args).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Msg("MySQLTx Exec success")
@@ -314,7 +316,7 @@ func (mt *MySQLTx) Commit(ctx context.Context) error {
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQLTx Commit fail")
 	} else {
@@ -323,7 +325,7 @@ func (mt *MySQLTx) Commit(ctx context.Context) error {
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Msg("MySQLTx Commit success")
 		}
@@ -348,7 +350,7 @@ func (mt *MySQLTx) Rollback(ctx context.Context) error {
 	mysqlCmd.Elapsed = time.Since(entry)
 
 	if mysqlCmd.Err != nil {
-		log.Error().Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+		utils.LogCtx(log.Error(), ctx).Err(mysqlCmd.Err).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 			Str("pos", mysqlCmd.Caller.Pos()).
 			Msg("MySQLTx Rollback fail")
 	} else {
@@ -357,7 +359,7 @@ func (mt *MySQLTx) Rollback(ctx context.Context) error {
 			logOut = false
 		}
 		if logOut {
-			log.Debug().Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
+			utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(mysqlCmd.Elapsed/time.Millisecond)).
 				Str("pos", mysqlCmd.Caller.Pos()).
 				Msg("MySQLTx Rollback success")
 		}

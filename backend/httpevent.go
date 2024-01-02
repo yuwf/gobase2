@@ -1,12 +1,12 @@
 package backend
 
+// https://github.com/yuwf/gobase2
+
 import (
 	"gobase/consul"
 	"gobase/goredis"
 	"gobase/redis"
 )
-
-// https://github.com/yuwf/gobase2
 
 type HttpEvent[T any] interface {
 	// consul服务器配置过滤器，返回符合条件的服务器

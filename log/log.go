@@ -1,5 +1,7 @@
 package log
 
+// https://github.com/yuwf/gobase2
+
 import (
 	"os"
 	"strconv"
