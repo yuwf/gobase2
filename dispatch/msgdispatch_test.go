@@ -78,7 +78,7 @@ func BenchmarkRegReqResp(b *testing.B) {
 			TestMsgHead: utils.TestMsgHead{
 				Msgid: msg.MsgID(),
 			},
-			BodyMsg: msg,
+			SendMsg: msg,
 		}
 		c.SendMsg(sendMsg)
 	}
@@ -101,7 +101,7 @@ func BenchmarkRegReqRespTimeOut(b *testing.B) {
 			TestMsgHead: utils.TestMsgHead{
 				Msgid: msg.MsgID(),
 			},
-			BodyMsg: msg,
+			SendMsg: msg,
 		}
 		c.SendMsg(sendMsg)
 	}
