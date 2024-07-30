@@ -4,9 +4,8 @@ import (
 	"testing"
 	"time"
 
-	_ "gobase/log"
-
 	"github.com/rs/zerolog/log"
+	_ "gobase/log"
 
 	"gobase/utils"
 )

@@ -3,9 +3,8 @@ package metrics
 import (
 	"testing"
 
-	_ "gobase/log"
-
 	"github.com/rs/zerolog/log"
+	_ "gobase/log"
 )
 
 func BenchmarkRegexp(b *testing.B) {

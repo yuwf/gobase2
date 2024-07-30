@@ -5,9 +5,8 @@ import (
 	"testing"
 	"time"
 
-	_ "gobase/log"
-
 	"github.com/afex/hystrix-go/hystrix"
+	_ "gobase/log"
 )
 
 func BenchmarkHttpRequest(b *testing.B) {
