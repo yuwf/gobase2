@@ -5,6 +5,7 @@ package backend
 import (
 	"gobase/consul"
 	"gobase/goredis"
+	"gobase/nacos"
 	"gobase/redis"
 )
 
@@ -35,6 +36,38 @@ func NewTcpBackendWithConsul[T any](consulAddr, tag string, event TcpEvent[T]) (
 	watcher.WatchServices(tag, func(infos []*consul.RegistryInfo) {
 		if tb.event != nil {
 			confs := tb.event.ConsulFilter(infos)
+			tb.updateServices(confs)
+		}
+	})
+	return tb, nil
+}
+
+// 创建TcpBackend，使用Nacos做服务器发现
+func NewTcpBackendWithNacos[T any](nacosCli *nacos.Client, serviceName, groupName string, clusters []string, event TcpEvent[T]) (*TcpBackend[T], error) {
+	tb := &TcpBackend[T]{
+		group:   map[string]*TcpGroup[T]{},
+		event:   event,
+		watcher: nacosCli,
+	}
+	// 服务发现部分
+	nacosCli.ListenService(serviceName, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+		if tb.event != nil {
+			confs := tb.event.NacosFilter(infos)
+			tb.updateServices(confs)
+		}
+	})
+	return tb, nil
+}
+func NewTcpBackendWithNacos2[T any](nacosCli *nacos.Client, serviceNames []string, groupName string, clusters []string, event TcpEvent[T]) (*TcpBackend[T], error) {
+	tb := &TcpBackend[T]{
+		group:   map[string]*TcpGroup[T]{},
+		event:   event,
+		watcher: nacosCli,
+	}
+	// 服务发现部分
+	nacosCli.ListenServices(serviceNames, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+		if tb.event != nil {
+			confs := tb.event.NacosFilter(infos)
 			tb.updateServices(confs)
 		}
 	})
@@ -140,6 +173,38 @@ func NewHttpBackendWithGoRedis[T any](cfg *goredis.Config, key string, serverNam
 	watcher.WatchServices(key, serverNames, func(infos []*goredis.RegistryInfo) {
 		if hb.event != nil {
 			confs := hb.event.GoRedisFilter(infos)
+			hb.updateServices(confs)
+		}
+	})
+	return hb, nil
+}
+
+// 创建HttpBackend，使用Nacos做服务器发现
+func NewHttpBackendWithNacos[T any](nacosCli *nacos.Client, serviceName, groupName string, clusters []string, event HttpEvent[T]) (*HttpBackend[T], error) {
+	hb := &HttpBackend[T]{
+		group:   map[string]*HttpGroup[T]{},
+		event:   event,
+		watcher: nacosCli,
+	}
+	// 服务发现部分
+	nacosCli.ListenService(serviceName, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+		if hb.event != nil {
+			confs := hb.event.NacosFilter(infos)
+			hb.updateServices(confs)
+		}
+	})
+	return hb, nil
+}
+func NewHttpBackendWithNacos2[T any](nacosCli *nacos.Client, serviceNames []string, groupName string, clusters []string, event HttpEvent[T]) (*HttpBackend[T], error) {
+	hb := &HttpBackend[T]{
+		group:   map[string]*HttpGroup[T]{},
+		event:   event,
+		watcher: nacosCli,
+	}
+	// 服务发现部分
+	nacosCli.ListenServices(serviceNames, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+		if hb.event != nil {
+			confs := hb.event.NacosFilter(infos)
 			hb.updateServices(confs)
 		}
 	})

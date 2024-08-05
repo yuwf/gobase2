@@ -5,12 +5,16 @@ package backend
 import (
 	"gobase/consul"
 	"gobase/goredis"
+	"gobase/nacos"
 	"gobase/redis"
 )
 
 type HttpEvent[T any] interface {
 	// consul服务器配置过滤器，返回符合条件的服务器
 	ConsulFilter(confs []*consul.RegistryInfo) []*ServiceConfig
+
+	// consul服务器配置过滤器，返回符合条件的服务器
+	NacosFilter(confs []*nacos.RegistryInfo) []*ServiceConfig
 
 	// redis服务器配置过滤器，返回符合条件的服务器
 	RedisFilter(confs []*redis.RegistryInfo) []*ServiceConfig
@@ -25,6 +29,9 @@ type HttpEventHandler[T any] struct {
 }
 
 func (*HttpEventHandler[T]) ConsulFilter(confs []*consul.RegistryInfo) []*ServiceConfig {
+	return []*ServiceConfig{}
+}
+func (*HttpEventHandler[T]) NacosFilter(confs []*nacos.RegistryInfo) []*ServiceConfig {
 	return []*ServiceConfig{}
 }
 func (*HttpEventHandler[T]) RedisFilter(confs []*redis.RegistryInfo) []*ServiceConfig {
