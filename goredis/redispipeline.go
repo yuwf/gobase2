@@ -4,6 +4,7 @@ package goredis
 
 import (
 	"context"
+	"errors"
 
 	"gobase/utils"
 
@@ -25,8 +26,11 @@ func (r *Redis) NewPipeline() *RedisPipeline {
 
 // 统一的命令
 func (p *RedisPipeline) Cmd(ctx context.Context, args ...interface{}) RedisResultBind {
+	if ctx.Value(utils.CtxKey_caller) == nil {
+		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
+	}
 	redisCmd := &RedisCommond{
-		Caller: utils.GetCallerDesc(1),
+		ctx: ctx,
 	}
 	p.Pipeliner.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
 	return redisCmd
@@ -39,34 +43,51 @@ func (p *RedisPipeline) ExecNoNil(ctx context.Context) ([]redis.Cmder, error) {
 
 // 参数v 参考Redis.HMGetObj的说明
 func (p *RedisPipeline) HMGetObj(ctx context.Context, key string, v interface{}) error {
-	redisCmd := &RedisCommond{
-		Caller: utils.GetCallerDesc(1),
+	if ctx.Value(utils.CtxKey_caller) == nil {
+		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}
-	// 组织参数
-	fargs, elemts, structtype, err := hmgetObjArgs(v)
+	redisCmd := &RedisCommond{
+		ctx: ctx,
+	}
+	// 获取结构数据
+	tags, elemts, err := utils.StructTagsAndValueOs(v, RedisTag)
 	if err != nil {
-		utils.LogCtx(log.Error(), ctx).Err(err).Str("pos", redisCmd.Caller.Pos()).Msg("RedisPipeline HMGetObj Param error")
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
-	redisCmd.hmgetCallback(elemts, structtype) // 管道里这个不会返回错误
+	if len(tags) == 0 {
+		err := errors.New("structmem invalid")
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
+		return err
+	}
+
+	redisCmd.bindobj = v
+	redisCmd.BindValues(elemts) // 管道里这个不会返回错误
 
 	args := []interface{}{"hmget", key}
-	args = append(args, fargs...)
+	args = append(args, tags...)
 	cmd := p.Pipeliner.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
 	return cmd.Err()
 }
 
 // 参数v 参考Redis.HMGetObj的说明
 func (p *RedisPipeline) HMSetObj(ctx context.Context, key string, v interface{}) error {
-	caller := utils.GetCallerDesc(1)
-	// 组织参数
-	fargs, err := hmsetObjArgs(v)
+	if ctx.Value(utils.CtxKey_caller) == nil {
+		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
+	}
+	fargs, err := utils.StructTagValues(v, RedisTag)
 	if err != nil {
-		utils.LogCtx(log.Error(), ctx).Err(err).Str("pos", caller.Pos()).Msg("RedisPipeline HMSetObj Param error")
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
+	if len(fargs) == 0 {
+		err := errors.New("structmem invalid")
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
+		return err
+	}
+	// 组织参数
 	args := []interface{}{"hmset", key}
 	args = append(args, fargs...)
-	cmd := p.Pipeliner.Do(context.WithValue(ctx, CtxKey_caller, caller), args...)
+	cmd := p.Pipeliner.Do(ctx, args...)
 	return cmd.Err()
 }

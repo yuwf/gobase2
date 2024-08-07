@@ -49,7 +49,7 @@ type MsgDispatch[Mr utils.RecvMsger, Cr any] struct {
 	// 必须设置，注册时获取具体消息的msgid
 	RegMsgID func(msgType reflect.Type) string
 	// 如果使用RegReqResp注册必须设置，用来发送Resp消息
-	SendResp func(ctx context.Context, m Mr, c *Cr, resp interface{})
+	SendResp func(ctx context.Context, req Mr, c *Cr, resp interface{})
 
 	handlers sync.Map // 处理函数  [msgid:*msgHandler]
 

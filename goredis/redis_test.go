@@ -89,7 +89,7 @@ func BenchmarkRedisHMSetObj(b *testing.B) {
 	}
 
 	type Test struct {
-		F1 int            `redis:"f1"`
+		F1 int            `redis:"f1,ff"`
 		F2 int            `redis:"f2"`
 		F3 []int          `redis:"f3"`
 		F4 map[string]int `redis:"f4"`
@@ -118,6 +118,16 @@ func BenchmarkRedisHMSetObj(b *testing.B) {
 	pipe.HMGetObj(context.TODO(), "pipett", t3)
 	pipe.Exec(context.TODO())
 	fmt.Printf("%v\n", t3)
+}
+
+func BenchmarkTryLockWait(b *testing.B) {
+	redis, _ := NewRedis(cfg)
+	if redis == nil {
+		return
+	}
+	redis.Lock(context.TODO(), "testkey", time.Second*5)
+	fun, err := redis.TryLockWait(context.TODO(), "testkey", time.Second*10)
+	fmt.Printf("%p %v\n", fun, err)
 }
 
 func BenchmarkLock(b *testing.B) {
