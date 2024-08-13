@@ -424,7 +424,6 @@ func (r *Redis) DoCmdInt64Map(ctx context.Context, cmd string, args ...interface
 // 结构成员类型 : Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32, Float64, String, []byte
 // 结构成员其他类型 : 通过Json转化
 // 传入的参数为结构的地址
-// 参数组织调用 hmsetObjArgs hmgetObjArgs
 func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
@@ -434,26 +433,25 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 		Cmd: "HMGET",
 	}
 	// 获取结构数据
-	tags, elemts, err := utils.StructTagsAndValueOs(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
-	if len(tags) == 0 {
+	if len(sInfo.Tags) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
 
 	redisCmd.Args = append(redisCmd.Args, key)
-	redisCmd.Args = append(redisCmd.Args, tags...)
+	redisCmd.Args = append(redisCmd.Args, sInfo.Tags...)
 	r.docmd(ctx, redisCmd)
 	if redisCmd.Err != nil {
 		return redisCmd.Err
 	}
 	// 回调
-	redisCmd.bindobj = v
-	redisCmd.Err = redisCmd.BindValues(elemts)
+	redisCmd.Err = redisCmd.BindValues(sInfo.Elemts)
 	return redisCmd.Err
 }
 
@@ -466,11 +464,12 @@ func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 		ctx: ctx,
 		Cmd: "HMSET",
 	}
-	fargs, err := utils.StructTagValues(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
+	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")

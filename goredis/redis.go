@@ -131,7 +131,6 @@ func (r *Redis) Do2(ctx context.Context, args ...interface{}) RedisResultBind {
 // 结构成员类型 : Bool, Int, Int8, Int16, Int32, Int64, Uint, Uint8, Uint16, Uint32, Uint64, Uintptr, Float32, Float64, String, []byte
 // 结构成员其他类型 : 通过Json转化
 // 传入的参数为结构的地址
-// 参数组织调用 hmsetObjArgs hmgetObjArgs
 func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
@@ -140,26 +139,25 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 		ctx: ctx,
 	}
 	// 获取结构数据
-	tags, elemts, err := utils.StructTagsAndValueOs(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
-	if len(tags) == 0 {
+	if len(sInfo.Tags) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
 
 	args := []interface{}{"hmget", key}
-	args = append(args, tags...)
+	args = append(args, sInfo.Tags...)
 	rst := r.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
 	if rst.Err() != nil {
 		return rst.Err()
 	}
 	// 回调
-	redisCmd.bindobj = v
-	err = redisCmd.BindValues(elemts)
+	err = redisCmd.BindValues(sInfo.Elemts)
 	return err
 }
 
@@ -169,11 +167,12 @@ func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 	if !ok {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}
-	fargs, err := utils.StructTagValues(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
+	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
@@ -275,10 +274,6 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 
 	// 回调绑定的
 	for _, cmd := range cmds {
-		if cmd.Err() != nil {
-			continue
-		}
-
 		c, _ := cmd.(*redis.Cmd) // 能绑定的都是redis.Cmd类型的命令
 		if c == nil {
 			continue
@@ -288,10 +283,26 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 		cctx := cvo.FieldByName("ctx")
 		tx, _ := reflect.NewAt(cctx.Type(), unsafe.Pointer(cctx.UnsafeAddr())).Elem().Interface().(context.Context)
 		if tx != nil {
-			rediscmd, _ := tx.Value(CtxKey_rediscmd).(*RedisCommond)
-			if rediscmd != nil && rediscmd.callback != nil {
-				rediscmd.Cmd = cmd
-				rediscmd.callback(c.Val())
+			rcmd, _ := tx.Value(CtxKey_rediscmd).(*RedisCommond)
+			if rcmd == nil {
+				continue
+			}
+			if rcmd.nscallback != nil && redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
+				r := rcmd.nscallback()
+				c.SetVal(r.Val()) // 修改命令结果
+				c.SetErr(r.Err())
+			}
+			if cmd.Err() != nil {
+				utils.LogCtx(log.Error(), ctx).Err(cmd.Err()).Str("cmd", rcmd.CmdString()).Msg("RedisCommond Error")
+				continue
+			}
+			if rcmd.callback != nil {
+				rcmd.Cmd = cmd
+				err := rcmd.callback(c.Val())
+				if err != nil {
+					c.SetErr(err)
+					utils.LogCtx(log.Error(), ctx).Err(err).Str("cmd", rcmd.CmdString()).Msg("RedisCommond Bind Error")
+				}
 			}
 		}
 	}

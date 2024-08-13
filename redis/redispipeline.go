@@ -144,21 +144,20 @@ func (p *RedisPipeline) HMGetObj(ctx context.Context, key string, v interface{})
 		Cmd: "HMGET",
 	}
 	// 获取结构数据
-	tags, elemts, err := utils.StructTagsAndValueOs(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
-	if len(tags) == 0 {
+	if len(sInfo.Tags) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
 
-	redisCmd.bindobj = v
-	redisCmd.BindValues(elemts) // 管道里这个不会返回错误
+	redisCmd.BindValues(sInfo.Elemts) // 管道里这个不会返回错误
 	redisCmd.Args = append(redisCmd.Args, key)
-	redisCmd.Args = append(redisCmd.Args, tags...)
+	redisCmd.Args = append(redisCmd.Args, sInfo.Tags...)
 	p.cmds = append(p.cmds, redisCmd)
 	return nil
 }
@@ -172,11 +171,12 @@ func (p *RedisPipeline) HMSetObj(ctx context.Context, key string, v interface{})
 		ctx: ctx,
 		Cmd: "HMSET",
 	}
-	fargs, err := utils.StructTagValues(v, RedisTag)
+	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
+	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
 		err := errors.New("structmem invalid")
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")

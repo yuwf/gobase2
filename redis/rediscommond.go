@@ -32,7 +32,6 @@ type RedisCommond struct {
 	CmdDesc string // 命令的描述
 
 	// 绑定回调
-	bindobj  interface{}
 	callback func(reply interface{}) error
 
 	// 执行结果 Reids直接调用命令使用，如果Reply和Err说明命令没有执行
@@ -180,7 +179,6 @@ func (c *RedisCommond) Bind(v interface{}) error {
 		return err
 	}
 	// 绑定回到函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -235,7 +233,6 @@ func (c *RedisCommond) BindSlice(v interface{}) error {
 		ind.Set(sli)
 	}
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		// 因为slice的地址在追加时一直变化最后给v重新赋值
 		defer func() {
@@ -321,7 +318,6 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 		ind.Set(m)
 	}
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -368,20 +364,19 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 }
 
 func (c *RedisCommond) BindValues(values []reflect.Value) error {
-	// c.bindobj = 调用此函数bindobj需要提起赋值
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case string:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case []byte:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case []interface{}:
 			rlen := len(r)
 			elen := len(values)
 			if rlen < elen {
-				return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+				return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 			}
 			rindex := rlen
 			for i := elen - 1; i >= 0; i -= 1 {
@@ -404,7 +399,7 @@ func (c *RedisCommond) BindValues(values []reflect.Value) error {
 		case redis.Error:
 			return r
 		}
-		return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+		return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 	}
 	// 直接调用的Redis 此时已经有结果值了
 	if c.Reply != nil || c.Err != nil {
@@ -418,83 +413,6 @@ func (c *RedisCommond) BindValues(values []reflect.Value) error {
 		}
 	}
 	return nil
-}
-
-// 把v对象的数据和tag数据 写到args中
-/*
-type Test struct {
-	F1 int `redis:"f1"`
-	F2 int `redis:"f2"`
-}
-上面的对象写入args中的格式为  "f1" F1 "f2" F2
-*/
-func hmsetObjArgs(v interface{}) ([]interface{}, error) {
-	var args []interface{}
-	// 验证参数
-	vo := reflect.ValueOf(v)
-	if vo.Kind() != reflect.Ptr {
-		return args, errors.New("param kind must be pointer")
-	}
-	if vo.IsNil() {
-		return args, errors.New("param pointer is nil")
-	}
-	structtype := vo.Elem().Type() // 第一层是指针，第二层是结构
-	structvalue := vo.Elem()
-	if structtype.Kind() != reflect.Struct {
-		return args, errors.New("param kind must be struct")
-	}
-
-	argsNum := len(args) // 先记录下进来时的参数个数
-	// 组织参数
-	numfield := structtype.NumField()
-	for i := 0; i < numfield; i += 1 {
-		tag := structtype.Field(i).Tag.Get(RedisTag)
-		if tag == "-" || tag == "" {
-			continue
-		}
-		parts := strings.Split(tag, ",")
-		tag = parts[0]
-		v := structvalue.Field(i)
-		if !v.CanAddr() {
-			continue
-		}
-		switch v.Kind() {
-		case reflect.Bool:
-			fallthrough
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			fallthrough
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			fallthrough
-		case reflect.Float32, reflect.Float64:
-			fallthrough
-		case reflect.String:
-			args = append(args, tag)
-			args = append(args, v.Interface())
-		case reflect.Slice:
-			if v.Type().Elem().Kind() == reflect.Uint8 {
-				args = append(args, tag)
-				args = append(args, v.Interface())
-				break
-			}
-			fallthrough
-		default:
-			if v.CanInterface() {
-				data, err := json.Marshal(v.Interface())
-				if err != nil {
-					return args, err
-				}
-				args = append(args, tag)
-				args = append(args, data)
-				break
-			}
-			// 对象转化成json
-			return args, errors.New("param not support " + fmt.Sprint(v.Type()))
-		}
-	}
-	if len(args) == argsNum {
-		return args, errors.New("structmem invalid")
-	}
-	return args, nil
 }
 
 func (c *RedisCommond) BindJsonObj(v interface{}) error {
@@ -517,7 +435,6 @@ func (c *RedisCommond) BindJsonObj(v interface{}) error {
 		return err
 	}
 
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -586,7 +503,6 @@ func (c *RedisCommond) BindJsonObjSlice(v interface{}) error {
 	}
 
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		// 因为slice的地址在追加时一直变化最后给v重新赋值
 		defer func() {
@@ -673,6 +589,12 @@ func int64Helper(r int64, v reflect.Value) error {
 }
 
 func stringHelper(r string, v reflect.Value) error {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
 	switch v.Kind() {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(r)
@@ -709,6 +631,9 @@ func stringHelper(r string, v reflect.Value) error {
 		fallthrough
 	default:
 		// 其他对象向json上转化
+		if len(r) == 0 {
+			return nil
+		}
 		if v.Kind() == reflect.Pointer {
 			if v.CanInterface() && v.CanSet() {
 				v.Set(reflect.New(v.Type().Elem()))
@@ -733,6 +658,12 @@ func stringHelper(r string, v reflect.Value) error {
 }
 
 func bytesHelper(r []byte, v reflect.Value) error {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
 	switch v.Kind() {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(string(r))
@@ -769,6 +700,9 @@ func bytesHelper(r []byte, v reflect.Value) error {
 		fallthrough
 	default:
 		// 其他对象向json上转化
+		if len(r) == 0 {
+			return nil
+		}
 		if v.Kind() == reflect.Pointer {
 			if v.CanInterface() && v.CanSet() {
 				v.Set(reflect.New(v.Type().Elem()))
@@ -779,7 +713,7 @@ func bytesHelper(r []byte, v reflect.Value) error {
 				break
 			}
 		} else {
-			if v.Addr().CanInterface() {
+			if v.CanAddr() && v.Addr().CanInterface() {
 				err := json.Unmarshal(r, v.Addr().Interface())
 				if err != nil {
 					return err

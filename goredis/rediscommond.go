@@ -58,8 +58,9 @@ type RedisCommond struct {
 	CmdDesc string        // 命令的描述
 	Elapsed time.Duration // 耗时
 	// 绑定回调
-	bindobj  interface{}
-	callback func(reply interface{}) error
+	callback func(reply interface{}) error // 如果命令失败 不再回调了
+
+	nscallback func() *redis.Cmd // 专门为管道中执行Script预留的变量
 }
 
 func (c *RedisCommond) CmdString() string {
@@ -262,7 +263,6 @@ func (c *RedisCommond) Bind(v interface{}) error {
 		return err
 	}
 	// 绑定回到函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -324,7 +324,6 @@ func (c *RedisCommond) BindSlice(v interface{}) error {
 		ind.Set(sli)
 	}
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		// 因为slice的地址在追加时一直变化最后给v重新赋值
 		defer func() {
@@ -416,7 +415,6 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 		ind.Set(m)
 	}
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -470,20 +468,19 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 }
 
 func (c *RedisCommond) BindValues(values []reflect.Value) error {
-	// c.bindobj = 调用此函数bindobj需要提起赋值
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case string:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case []byte:
-			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+			return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 		case []interface{}:
 			rlen := len(r)
 			elen := len(values)
 			if rlen < elen {
-				return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+				return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 			}
 			rindex := rlen
 			for i := elen - 1; i >= 0; i -= 1 {
@@ -506,7 +503,7 @@ func (c *RedisCommond) BindValues(values []reflect.Value) error {
 		case redis.Error:
 			return r
 		}
-		return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(c.bindobj))
+		return fmt.Errorf(typeErrFmt, reflect.TypeOf(reply), reply, reflect.TypeOf(values))
 	}
 	// 直接调用的Redis 此时已经有结果值了
 	if c.Cmd != nil {
@@ -549,7 +546,6 @@ func (c *RedisCommond) BindJsonObj(v interface{}) error {
 		return err
 	}
 
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		switch r := reply.(type) {
 		case int64:
@@ -625,7 +621,6 @@ func (c *RedisCommond) BindJsonObjSlice(v interface{}) error {
 	}
 
 	// 绑定回调函数
-	c.bindobj = v
 	c.callback = func(reply interface{}) error {
 		// 因为slice的地址在追加时一直变化最后给v重新赋值
 		defer func() {
@@ -719,6 +714,12 @@ func int64Helper(r int64, v reflect.Value) error {
 }
 
 func stringHelper(r string, v reflect.Value) error {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
 	switch v.Kind() {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(r)
@@ -755,6 +756,9 @@ func stringHelper(r string, v reflect.Value) error {
 		fallthrough
 	default:
 		// 其他对象向json上转化
+		if len(r) == 0 {
+			return nil
+		}
 		if v.Kind() == reflect.Pointer {
 			if v.CanInterface() && v.CanSet() {
 				v.Set(reflect.New(v.Type().Elem()))
@@ -779,6 +783,12 @@ func stringHelper(r string, v reflect.Value) error {
 }
 
 func bytesHelper(r []byte, v reflect.Value) error {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
 	switch v.Kind() {
 	case reflect.Bool:
 		b, err := strconv.ParseBool(string(r))
@@ -815,6 +825,9 @@ func bytesHelper(r []byte, v reflect.Value) error {
 		fallthrough
 	default:
 		// 其他对象向json上转化
+		if len(r) == 0 {
+			return nil
+		}
 		if v.Kind() == reflect.Pointer {
 			if v.CanInterface() && v.CanSet() {
 				v.Set(reflect.New(v.Type().Elem()))
