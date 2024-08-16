@@ -115,7 +115,7 @@ func (r *Redis) RegHook(f func(ctx context.Context, cmd *RedisCommond)) {
 }
 
 // 支持返回值绑定的函数
-func (r *Redis) Do2(ctx context.Context, args ...interface{}) RedisResultBind {
+func (r *Redis) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}
@@ -304,6 +304,15 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 					utils.LogCtx(log.Error(), ctx).Err(err).Str("cmd", rcmd.CmdString()).Msg("RedisCommond Bind Error")
 				}
 			}
+		}
+	}
+
+	// 因为上面的回调绑定可能会重新刷新结果 给重新找一个错误，go-redis也是这样找的
+	err = nil
+	for _, cmd := range cmds {
+		if r := cmd.Err(); r != nil {
+			err = r
+			break
 		}
 	}
 

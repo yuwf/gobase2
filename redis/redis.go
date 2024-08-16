@@ -115,7 +115,7 @@ func (r *Redis) Do(ctx context.Context, cmd string, args ...interface{}) (interf
 	return redisCmd.Reply, redisCmd.Err
 }
 
-func (r *Redis) Do2(ctx context.Context, cmd string, args ...interface{}) RedisResultBind {
+func (r *Redis) Do2(ctx context.Context, cmd string, args ...interface{}) *RedisCommond {
 	return r.do(ctx, cmd, args...)
 }
 

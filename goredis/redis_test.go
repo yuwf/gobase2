@@ -74,7 +74,7 @@ func BenchmarkRedis(b *testing.B) {
 	`)
 	//var s string
 	t := redis.DoScript(context.TODO(), script, []string{"script"}, "script---")
-	fmt.Println(t.String())
+	fmt.Println(t.Text())
 }
 
 func BenchmarkPipelineScript(b *testing.B) {

@@ -27,7 +27,7 @@ func (r *Redis) NewPipeline() *RedisPipeline {
 }
 
 // 统一的命令
-func (p *RedisPipeline) Cmd(ctx context.Context, args ...interface{}) RedisResultBind {
+func (p *RedisPipeline) Cmd(ctx context.Context, args ...interface{}) *RedisCommond {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}
@@ -68,7 +68,7 @@ func (p *RedisPipeline) Script(ctx context.Context, script *RedisScript, keys []
 	return p.Pipeliner.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), param...)
 }
 
-func (p *RedisPipeline) Script2(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) RedisResultBind {
+func (p *RedisPipeline) Script2(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) *RedisCommond {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}

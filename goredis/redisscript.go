@@ -38,7 +38,7 @@ func (r *Redis) DoScript(ctx context.Context, script *RedisScript, keys []string
 	return script.script.Run(ctx, r.UniversalClient, keys, args...)
 }
 
-func (r *Redis) DoScript2(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) RedisResultBind {
+func (r *Redis) DoScript2(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) *RedisCommond {
 	ctx = context.WithValue(ctx, CtxKey_noscript, 1) // 屏蔽NOSCRIPT的错误日志
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))

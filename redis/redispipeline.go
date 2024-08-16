@@ -53,9 +53,11 @@ func (p *RedisPipeline) do(ctx context.Context) error {
 	if p.cmds == nil || len(p.cmds) == 0 {
 		return nil
 	}
-	caller := utils.GetCallerDesc(2)
+	if ctx.Value(utils.CtxKey_caller) == nil {
+		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(2))
+	}
 	if p.pool == nil {
-		utils.LogCtx(log.Error(), ctx).Str("pos", caller.Pos()).Msg("RedisPipeline pool is nil")
+		utils.LogCtx(log.Error(), ctx).Msg("RedisPipeline pool is nil")
 		return errors.New("RedisPipeline pool is nil")
 	}
 	entry := time.Now()
@@ -81,7 +83,7 @@ func (p *RedisPipeline) do(ctx context.Context) error {
 				l.Str(fmt.Sprint("cmd", i), cmd.CmdString())
 				l.Str(fmt.Sprint("reply", i), cmd.ReplyString())
 			}
-			l.Str("pos", caller.Pos()).Msg("RedisPipeline docmd")
+			l.Msg("RedisPipeline docmd")
 		}
 
 		p.cmds = nil // 执行完清空命令
@@ -96,7 +98,7 @@ func (p *RedisPipeline) do(ctx context.Context) error {
 	}
 	err := conn.Flush()
 	if err != nil {
-		utils.LogCtx(log.Error(), ctx).Err(err).Str("pos", caller.Pos()).Msg("RedisPipeline Flush Error")
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline Flush Error")
 		return err
 	}
 
@@ -121,7 +123,7 @@ func (p *RedisPipeline) do(ctx context.Context) error {
 }
 
 // 统一的命令
-func (p *RedisPipeline) Cmd(ctx context.Context, commandName string, args ...interface{}) RedisResultBind {
+func (p *RedisPipeline) Cmd(ctx context.Context, commandName string, args ...interface{}) *RedisCommond {
 	if ctx.Value(utils.CtxKey_caller) == nil {
 		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
 	}

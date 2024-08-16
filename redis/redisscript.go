@@ -29,7 +29,7 @@ func (r *Redis) DoScript(ctx context.Context, script *RedisScript, keysAndArgs .
 	return redisCmd.Reply, redisCmd.Err
 }
 
-func (r *Redis) DoScript2(ctx context.Context, script *RedisScript, keysAndArgs ...interface{}) RedisResultBind {
+func (r *Redis) DoScript2(ctx context.Context, script *RedisScript, keysAndArgs ...interface{}) *RedisCommond {
 	return r.doScript(ctx, script, keysAndArgs...)
 }
 

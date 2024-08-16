@@ -72,7 +72,7 @@ func BenchmarkRegMsg(b *testing.B) {
 func BenchmarkRegReqResp(b *testing.B) {
 	s := &Server{}
 	s.RegMsgID = utils.TestRegMsgID
-	s.SendResp = func(ctx context.Context, m *utils.TestMsg, c *Client[string], resp interface{}) {
+	s.SendResp = func(ctx context.Context, m *utils.TestMsg, c *Client[string], respid string, resp interface{}) {
 		msg, _ := resp.(utils.TestMsgBody)
 		sendMsg := &utils.TestMsg{
 			TestMsgHead: utils.TestMsgHead{
@@ -95,7 +95,7 @@ func BenchmarkRegReqResp(b *testing.B) {
 func BenchmarkRegReqRespTimeOut(b *testing.B) {
 	s := &Server{}
 	s.RegMsgID = utils.TestRegMsgID
-	s.SendResp = func(ctx context.Context, m *utils.TestMsg, c *Client[string], resp interface{}) {
+	s.SendResp = func(ctx context.Context, m *utils.TestMsg, c *Client[string], respid string, resp interface{}) {
 		msg, _ := resp.(utils.TestMsgBody)
 		sendMsg := &utils.TestMsg{
 			TestMsgHead: utils.TestMsgHead{

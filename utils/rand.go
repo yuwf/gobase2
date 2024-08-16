@@ -24,7 +24,7 @@ func RandInt() int {
 func RandIntn(n int) int {
 	if n <= 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int("n", n).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int("n", n).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Intn(n)
@@ -39,7 +39,7 @@ func RandInt31() int32 {
 func RandInt31n(n int32) int32 {
 	if n <= 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int32("n", n).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int32("n", n).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int31n(n)
@@ -59,7 +59,7 @@ func RandInt63() int64 {
 func RandInt63n(n int64) int64 {
 	if n <= 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int64("n", n).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int64("n", n).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int63n(n)
@@ -86,7 +86,7 @@ func RandFloat64() float64 {
 func RandIntnm(n, m int) int {
 	if !(n >= 0 && m > n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int("n", n).Int("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int("n", n).Int("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int()%(m-n) + n
@@ -96,7 +96,7 @@ func RandIntnm(n, m int) int {
 func RandIntnm2(n, m int) int {
 	if !(n >= 0 && m >= n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int("n", n).Int("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int("n", n).Int("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int()%(m-n+1) + n
@@ -106,7 +106,7 @@ func RandIntnm2(n, m int) int {
 func RandInt31nm(n, m int32) int32 {
 	if !(n >= 0 && m > n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int32("n", n).Int32("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int32("n", n).Int32("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int31()%(m-n) + n
@@ -116,7 +116,7 @@ func RandInt31nm(n, m int32) int32 {
 func RandInt31nm2(n, m int32) int32 {
 	if !(n >= 0 && m >= n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int32("n", n).Int32("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int32("n", n).Int32("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int31()%(m-n+1) + n
@@ -126,7 +126,7 @@ func RandInt31nm2(n, m int32) int32 {
 func RandInt63nm(n, m int64) int64 {
 	if !(n >= 0 && m > n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int64("n", n).Int64("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int64("n", n).Int64("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int63()%(m-n) + n
@@ -136,7 +136,7 @@ func RandInt63nm(n, m int64) int64 {
 func RandInt63nm2(n, m int64) int64 {
 	if !(n >= 0 && m >= n) {
 		caller := GetCallerDesc(1)
-		log.Error().Int64("n", n).Int64("m", m).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int64("n", n).Int64("m", m).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return 0
 	}
 	return rand.Int63()%(m-n+1) + n
@@ -145,7 +145,7 @@ func RandInt63nm2(n, m int64) int64 {
 func RandShuffle(n int, swap func(i, j int)) {
 	if n < 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int("n", n).Str("pos", caller.Pos()).Msg("RandParamErr")
+		log.Error().Int("n", n).Str("callPos", caller.Pos()).Msg("RandParamErr")
 		return
 	}
 	rand.Shuffle(n, swap)
@@ -182,12 +182,12 @@ func RandString(size int) string {
 func RandString2(size int, charset []byte) string {
 	if size <= 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int("size", size).Str("pos", caller.Pos()).Msg("RandString2")
+		log.Error().Int("size", size).Str("callPos", caller.Pos()).Msg("RandString2")
 		return ""
 	}
 	if len(charset) <= 0 {
 		caller := GetCallerDesc(1)
-		log.Error().Int("charset", len(charset)).Str("pos", caller.Pos()).Msg("RandString2")
+		log.Error().Int("charset", len(charset)).Str("callPos", caller.Pos()).Msg("RandString2")
 		return ""
 	}
 	b := make([]byte, size)

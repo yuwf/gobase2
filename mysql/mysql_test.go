@@ -11,8 +11,8 @@ var cfg = &Config{
 }
 
 type Users struct {
-	Host string `db:"host"`
-	User string `db:"User,cond"`
+	Host  string `db:"host"`
+	User  string `db:"User,cond"`
 	Testt string `db:"Testt"`
 }
 
@@ -26,9 +26,9 @@ func BenchmarkMySQL(b *testing.B) {
 		return
 	}
 
-	//var name Name
-	//err = mysql.Get(context.TODO(), &name, "SELECT Host, User FROM user WHERE User=?", "root")
-	//fmt.Println(name, err)
+	var name Name
+	err = mysql.Get(context.TODO(), &name, "SELECT User FROM user WHERE User=? and Host=?", "root", "local'host")
+	fmt.Println(name, err)
 
 	var users []Users
 	mysql.Select(context.TODO(), &users, "SELECT host, User FROM user")
