@@ -3,6 +3,7 @@ package mrcache
 // https://github.com/yuwf/gobase2
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -50,9 +51,9 @@ func (cond TableConds) Eq(field string, value interface{}) TableConds {
 	return append(cond, &TableCond{field: field, op: "=", value: value})
 }
 
-// 为了减少理解的复杂读，目前只支持Eq，下面的屏蔽掉
+// 为了减少理解的复杂读，在Get Set Modify的条件中不要使用下面的条件
 
-/*func (cond TableConds) Ne(field string, value interface{}) TableConds {
+func (cond TableConds) Ne(field string, value interface{}) TableConds {
 	return append(cond, &TableCond{field: field, op: "<>", value: value})
 }
 
@@ -109,4 +110,4 @@ func (cond TableConds) Or() TableConds {
 		cond[len(cond)-1].link = "OR"
 	}
 	return cond
-}*/
+}

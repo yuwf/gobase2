@@ -19,7 +19,7 @@ import (
 
 // T 为数据库结构类型，可重复多协程使用
 // 使用场景：查询条件只对应一个结果 redis使用hash结构缓存这个结果
-// redis的hash的field和mysql的field对应，空值不会写入到redis中
+// redis的hash的field和mysql的field对应
 // redis的key 见CacheRow.checkCond说明
 type CacheRow[T any] struct {
 	*Cache
@@ -74,13 +74,13 @@ func (c *CacheRow[T]) Get(ctx context.Context, cond TableConds) (*T, error) {
 
 	dest := new(T)
 	destInfo, _ := utils.GetStructInfoByTag(dest, DBTag) // 这里不用判断err了
-	err = c.redis.DoScript2(ctx, hmgetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
+	err = c.redis.DoScript2(ctx, rowGetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
 	if err == nil {
 		return dest, nil
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, _, err := c.preLoad(ctx, cond, key, false)
+	preData, _, err := c.preLoad(ctx, cond, key, false, nil)
 	if err == ErrNullData {
 		return nil, err // 空数据直接返回
 	}
@@ -95,7 +95,7 @@ func (c *CacheRow[T]) Get(ctx context.Context, cond TableConds) (*T, error) {
 	// 如果不是自己执行的预加载，这里重新读取下
 	dest = new(T) // 防止上面的数据有干扰
 	destInfo, _ = utils.GetStructInfoByTag(dest, DBTag)
-	err = c.redis.DoScript2(ctx, hmgetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
+	err = c.redis.DoScript2(ctx, rowGetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
 		return nil, err
@@ -117,7 +117,7 @@ func (c *CacheRow[T]) GetOC(ctx context.Context, condValue interface{}) (*T, err
 }
 
 // 写数据
-// cond：查询条件变量 field:value, 可以有多个条件但至少有一个条件 (条件具有唯一性，不唯一只能读取一条数据)
+// cond：查询条件变量
 // data：修改内容
 // -     可以是结构或者结构指针，内部的数据是要保存的数据
 // -     data.tags名称需要和T一致，可以是T的一部分
@@ -157,10 +157,15 @@ func (c *CacheRow[T]) Set(ctx context.Context, cond TableConds, data interface{}
 	}
 
 	// 预加载 尝试从数据库中读取
-	_, incrValue, err := c.preLoad(ctx, cond, key, nc)
+	_, incrValue, err := c.preLoad(ctx, cond, key, nc, dataInfo)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
 		return nil, err
+	}
+
+	// 返回了自增，数据添加已经完成了
+	if incrValue != nil {
+		return incrValue, nil
 	}
 
 	// 再次写数据
@@ -233,10 +238,20 @@ func (c *CacheRow[T]) Modify(ctx context.Context, cond TableConds, data interfac
 	}
 
 	// 预加载 尝试从数据库中读取
-	_, _, err = c.preLoad(ctx, cond, key, nc)
+	preData, incrValue, err := c.preLoad(ctx, cond, key, nc, dataInfo)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
 		return nil, err
+	}
+
+	// 返回了自增，数据添加已经完成了，预加载的数据就是新增的
+	if incrValue != nil {
+		dInfo, _ := utils.GetStructInfoByTag(preData, DBTag)
+		if dInfo.Elemts[c.incrementFieldIndex].Int() == incrValue.(int64) {
+			dInfo.CopyTo(resInfo)
+			return res, nil
+		}
+		return nil, ErrNullData
 	}
 
 	// 再次写数据
@@ -264,7 +279,7 @@ func (c *CacheRow[T]) ModifyOC(ctx context.Context, condValue interface{}, data 
 }
 
 // 检查条件，返回redis缓存key
-// key可以：表名_{condValue1}_condValue2  如果CacheRow.hashTagField == condValue1 condValue1会添加上{}
+// key可以：mrr_表名_{condValue1}_condValue2  如果CacheRow.hashTagField == condValue1 condValue1会添加上{}
 func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 	if len(cond) == 0 {
 		return "", errors.New("cond is nil")
@@ -272,6 +287,10 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 
 	// 条件中的字段必须都存在，且类型还要一致
 	for _, v := range cond {
+		if v.op != "=" {
+			err := fmt.Errorf("cond:%s not Eq", v.field) // 条件变量的是等号
+			return "", err
+		}
 		at := c.tableInfo.FindIndexByTag(v.field)
 		if at == -1 {
 			err := fmt.Errorf("tag:%s not find in %s", v.field, c.tableInfo.T.String())
@@ -289,9 +308,9 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 	if len(cond) == 1 {
 		for _, v := range cond {
 			if c.hashTagField == v.field {
-				return fmt.Sprintf("%s_{%v}", c.tableName, v.value), nil
+				return fmt.Sprintf("mrr_%s_{%v}", c.tableName, v.value), nil
 			} else {
-				return fmt.Sprintf("%s_%v", c.tableName, v.value), nil
+				return fmt.Sprintf("mrr_%s_%v", c.tableName, v.value), nil
 			}
 		}
 	}
@@ -302,7 +321,7 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 	sort.Slice(temp, func(i, j int) bool { return temp[i].field < temp[j].field })
 
 	var key strings.Builder
-	key.WriteString(c.tableName)
+	key.WriteString("mrr_" + c.tableName)
 	for _, v := range temp {
 		if v.field == c.hashTagField {
 			key.WriteString(fmt.Sprintf("_{%v}", v.value))
@@ -318,7 +337,7 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 // nc：加载不存在是否创建
 // *T： 因为加载时抢占式的，!= nil 表示是本逻辑执行了加载，否则没有执行加载
 // error： 执行结果
-func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, nc bool) (*T, interface{}, error) {
+func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, nc bool, dataInfo *utils.StructInfo) (*T, interface{}, error) {
 	// 根据是否要创建数据，来判断使用什么锁
 	if nc {
 		// 不存在要创建数据
@@ -332,7 +351,7 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, 
 		t, err := c.getFromMySQL(ctx, cond)
 		if err == ErrNullData {
 			// 创建数据
-			incrValue, err = c.addToMySQL(ctx, cond)
+			incrValue, err = c.addToMySQL(ctx, cond, dataInfo)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -385,7 +404,7 @@ func (c *CacheRow[T]) mysqlToRedis(ctx context.Context, key string, data *T) err
 		redisParams = append(redisParams, tInfo.Tags[i])
 		redisParams = append(redisParams, vfmt)
 	}
-	cmd := c.redis.DoScript(ctx, hmaddScript, []string{key}, redisParams...)
+	cmd := c.redis.DoScript(ctx, rowAddScript, []string{key}, redisParams...)
 	if cmd.Err() != nil {
 		return cmd.Err()
 	}
@@ -393,7 +412,7 @@ func (c *CacheRow[T]) mysqlToRedis(ctx context.Context, key string, data *T) err
 }
 
 func (c *CacheRow[T]) redisSetToMysql(ctx context.Context, cond TableConds, key string, redisParams []interface{}, dataInfo *utils.StructInfo) error {
-	cmd := c.redis.DoScript2(ctx, hmsetScript, []string{key}, redisParams...)
+	cmd := c.redis.DoScript2(ctx, rowSetScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		// 同步mysql
 		err := c.saveToMySQL(ctx, cond, dataInfo)
@@ -432,7 +451,7 @@ func (c *CacheRow[T]) redisSetParam(cond TableConds, dataInfo *utils.StructInfo)
 }
 
 func (c *CacheRow[T]) redisModifyToMysql(ctx context.Context, cond TableConds, key string, redisParams []interface{}, resInfo *utils.StructInfo) error {
-	cmd := c.redis.DoScript2(ctx, hmodifyScript, []string{key}, redisParams...)
+	cmd := c.redis.DoScript2(ctx, rowModifyScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		err := cmd.BindValues(resInfo.Elemts)
 		if err == nil {

@@ -45,6 +45,8 @@ type Cache struct {
 	// 只有一个查询条件时，配置这个查询字段名，然后调用OC结尾的系列函数
 	oneCondField string // 该字段名必须在结果表中存在  区分大小写
 
+	queryCond TableConds // 查找数据总过滤条件
+
 	// 运行时数据，结构表数据
 	tableInfo *TableStruct // 不可修改 不可接受数据 只是用来记录结构类型
 }
@@ -61,8 +63,8 @@ func (c *Cache) ConfigHashTag(hashTagField string) error {
 }
 
 // 配置过期
-func (c *Cache) ConfigExpire(expire int) error {
-	c.expire = expire
+func (c *Cache) ConfigQueryCond(cond TableConds) error {
+	c.queryCond = cond
 	return nil
 }
 
@@ -104,6 +106,11 @@ func (c *Cache) ConfigOneCondField(oneCondField string) error {
 	return nil
 }
 
+func (c *Cache) ConfigExpire(expire int) error {
+	c.expire = expire
+	return nil
+}
+
 // 检查结构数据
 // 可以是结构或者结构指针 data.tags名称需要和T一致，可以是T的一部分
 // 如果合理 返回data的结构信息
@@ -128,13 +135,14 @@ func (c *Cache) checkData(data interface{}) (*utils.StructInfo, error) {
 	return dataInfo, nil
 }
 
-// 往MySQL中添加一条数据，返回自增值，如果条件时=的，会设置为默认值
-func (c *Cache) addToMySQL(ctx context.Context, cond TableConds) (int64, error) {
+// 往MySQL中添加一条数据，返回自增值，如果条件是=的，会设置为默认值
+func (c *Cache) addToMySQL(ctx context.Context, cond TableConds, dataInfo *utils.StructInfo) (int64, error) {
 	var incrementId int64
-	if v := cond.Find(c.incrementField); v != nil {
-		// 如果条件变量中有自增字段，优先使用
-		incrementId = reflect.ValueOf(v.value).Int()
-	} else if len(c.incrementTable) != 0 {
+	if at := dataInfo.FindIndexByTag(c.incrementField); at != -1 {
+		// 如果结构中有自增字段，优先使用
+		incrementId = dataInfo.Elemts[at].Int()
+	}
+	if incrementId == 0 && len(c.incrementTable) != 0 {
 		// 如果配置了自增 先获取自增id
 		err := c.incrementReids.Do2(ctx, "HINCRBY", IncrementKey, c.incrementTable, 1).Bind(&incrementId)
 		if err != nil {
@@ -170,6 +178,13 @@ func (c *Cache) addToMySQL(ctx context.Context, cond TableConds) (int64, error) 
 		if v := cond.Find(tag.(string)); v != nil {
 			args = append(args, v.value)
 			continue
+		}
+		// 从结构数据中查找
+		if dataInfo != nil {
+			if at := dataInfo.FindIndexByTag(tag); at != -1 && dataInfo.Elemts[at].CanInterface() {
+				args = append(args, dataInfo.Elemts[at].Interface())
+				continue
+			}
 		}
 		// 都没有就创建一个空的
 		args = append(args, reflect.New(c.tableInfo.ElemtsType[i]).Interface())
@@ -212,7 +227,7 @@ func (c *Cache) getFromMySQL(ctx context.Context, cond TableConds) (interface{},
 	sqlStr.WriteString(c.tableName)
 	sqlStr.WriteString(" WHERE ")
 
-	args := make([]interface{}, 0, len(cond))
+	args := make([]interface{}, 0, len(cond)+len(c.queryCond))
 	for i, v := range cond {
 		if i > 0 {
 			if len(cond[i-1].link) > 0 {
@@ -221,6 +236,12 @@ func (c *Cache) getFromMySQL(ctx context.Context, cond TableConds) (interface{},
 				sqlStr.WriteString(" AND ")
 			}
 		}
+		sqlStr.WriteString(v.field)
+		sqlStr.WriteString(v.op + "?")
+		args = append(args, v.value)
+	}
+	for _, v := range c.queryCond {
+		sqlStr.WriteString(" AND ")
 		sqlStr.WriteString(v.field)
 		sqlStr.WriteString(v.op + "?")
 		args = append(args, v.value)
@@ -253,7 +274,7 @@ func (c *Cache) getsFromMySQL(ctx context.Context, cond TableConds) (interface{}
 	sqlStr.WriteString(c.tableName)
 	sqlStr.WriteString(" WHERE ")
 
-	args := make([]interface{}, 0, len(cond))
+	args := make([]interface{}, 0, len(cond)+len(c.queryCond))
 	for i, v := range cond {
 		if i > 0 {
 			if len(cond[i-1].link) > 0 {
@@ -262,6 +283,12 @@ func (c *Cache) getsFromMySQL(ctx context.Context, cond TableConds) (interface{}
 				sqlStr.WriteString(" AND ")
 			}
 		}
+		sqlStr.WriteString(v.field)
+		sqlStr.WriteString(v.op + "?")
+		args = append(args, v.value)
+	}
+	for _, v := range c.queryCond {
+		sqlStr.WriteString(" AND ")
 		sqlStr.WriteString(v.field)
 		sqlStr.WriteString(v.op + "?")
 		args = append(args, v.value)

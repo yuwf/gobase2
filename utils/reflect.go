@@ -86,8 +86,8 @@ func GetStructInfoByTag(i interface{}, tagName string) (*StructInfo, error) {
 	return sInfo, nil
 }
 
-func (c *StructInfo) FindIndexByTag(tag interface{}) int {
-	for i, f := range c.Tags {
+func (si *StructInfo) FindIndexByTag(tag interface{}) int {
+	for i, f := range si.Tags {
 		if f == tag {
 			return i
 		}
@@ -96,13 +96,25 @@ func (c *StructInfo) FindIndexByTag(tag interface{}) int {
 }
 
 // 不区分大消息查找
-func (c *StructInfo) FindIndexByTagFold(tag string) int {
-	for i, f := range c.Tags {
+func (si *StructInfo) FindIndexByTagFold(tag string) int {
+	for i, f := range si.Tags {
 		if strings.EqualFold(f.(string), tag) {
 			return i
 		}
 	}
 	return -1
+}
+
+// 拷贝tag相同的字段，相同类型的引用为浅拷贝
+func (si *StructInfo) CopyTo(sInfo *StructInfo) {
+	for i, v := range si.Elemts {
+		if !v.CanInterface() {
+			continue
+		}
+		if at := sInfo.FindIndexByTag(si.Tags[i]); at != -1 {
+			InterfaceToValue(v.Interface(), sInfo.Elemts[at])
+		}
+	}
 }
 
 // tag和elemt格式化 []interface{}{"f1" F1 "f2" F2} error
