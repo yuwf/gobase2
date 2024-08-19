@@ -190,7 +190,6 @@ func BenchmarkRowsGet(b *testing.B) {
 	fmt.Println(user, err)
 }
 
-
 func BenchmarkRowsSet(b *testing.B) {
 	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
 	if err != nil {
@@ -278,100 +277,12 @@ func BenchmarkRowsModify(b *testing.B) {
 	//a := 10
 	s := &ModifyTest{
 		Id:   8022,
-		Name: "namenamen",
+		Name: "namenamen8022",
 		Age:  1000,
-		Type: 15,
+		Type: 10,
 	}
 
 	incrValue, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123), s, true)
 
 	fmt.Println(incrValue, err)
-}
-
-func BenchmarkGetColumn(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
-		return
-	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
-	if err != nil {
-		return
-	}
-
-	cache := NewCacheColumn[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
-	if err != nil {
-		return
-	}
-
-	user, err := cache.Get(context.TODO(), NewConds().Eq("UID", 123))
-	fmt.Println(user, err)
-}
-
-func BenchmarkSetColumn(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
-		return
-	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
-	if err != nil {
-		return
-	}
-
-	cache := NewCacheColumn[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
-	if err != nil {
-		return
-	}
-
-	type SetTest struct {
-		Id   int    `db:"Id"json:"Id,omitempty"`     //自增住建  不可为空
-		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
-		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
-	}
-
-	s := &SetTest{
-		Id:   7009,
-		Name: "ddddddd",
-		Age:  10000,
-	}
-
-	incrValue, err := cache.Set(context.TODO(), NewConds().Eq("UID", 123), s, true)
-	fmt.Println(incrValue, err)
-}
-
-func BenchmarkModifyColumn(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
-		return
-	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
-	if err != nil {
-		return
-	}
-
-	cache := NewCacheColumn[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
-	if err != nil {
-		return
-	}
-
-	type ModifyTest struct {
-		Age  *int   `db:"Age"json:"Age,omitempty"`   //年龄
-		Id   int    `db:"Id"json:"Id,omitempty"`     //自增住建  不可为空
-		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
-	}
-
-	a := 10
-	s := &ModifyTest{
-		Id:   7015,
-		Name: "dddddddddddddds",
-		Age:  &a,
-	}
-
-	t, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123), s, true)
-	fmt.Println(t, err)
 }

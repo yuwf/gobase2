@@ -78,6 +78,11 @@ func (c *CacheRow[T]) Get(ctx context.Context, cond TableConds) (*T, error) {
 	if err == nil {
 		return dest, nil
 	} else if goredis.IsNilError(err) {
+		if IsPass(key) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
@@ -158,6 +163,11 @@ func (c *CacheRow[T]) Set(ctx context.Context, cond TableConds, data interface{}
 	if err == nil {
 		return nil, nil
 	} else if err == ErrNullData {
+		if IsPass(key) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
@@ -239,6 +249,11 @@ func (c *CacheRow[T]) Modify(ctx context.Context, cond TableConds, data interfac
 	if err == nil {
 		return res, nil
 	} else if err == ErrNullData {
+		if IsPass(key) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
@@ -286,7 +301,7 @@ func (c *CacheRow[T]) ModifyOC(ctx context.Context, condValue interface{}, data 
 	return c.Modify(ctx, NewConds().Eq(c.oneCondField, condValue), data, nc)
 }
 
-// 检查条件，返回redis缓存key
+// 检查条件，返回缓存key
 // key可以：mrr_表名_{condValue1}_condValue2  如果CacheRow.hashTagField == condValue1 condValue1会添加上{}
 func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 	if len(cond) == 0 {
@@ -312,24 +327,16 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 		}
 	}
 
-	// 优化效率
-	if len(cond) == 1 {
-		for _, v := range cond {
-			if c.hashTagField == v.field {
-				return fmt.Sprintf("mrr_%s_{%v}", c.tableName, v.value), nil
-			} else {
-				return fmt.Sprintf("mrr_%s_%v", c.tableName, v.value), nil
-			}
-		}
+	temp := cond
+	if len(cond) > 1 {
+		// 根据field排序，不要影响cond，拷贝一份
+		temp = make(TableConds, len(cond))
+		copy(temp, cond)
+		sort.Slice(temp, func(i, j int) bool { return temp[i].field < temp[j].field })
 	}
 
-	// 根据field排序
-	temp := make(TableConds, len(cond))
-	copy(temp, cond)
-	sort.Slice(temp, func(i, j int) bool { return temp[i].field < temp[j].field })
-
 	var key strings.Builder
-	key.WriteString("mrr_" + c.tableName)
+	key.WriteString(KeyPrefix + "mrr_" + c.tableName)
 	for _, v := range temp {
 		if v.field == c.hashTagField {
 			key.WriteString(fmt.Sprintf("_{%v}", v.value))
@@ -386,6 +393,9 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, 
 			defer unlock()
 			t, err := c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond)
 			if err != nil {
+				if err == ErrNullData {
+					SetPass(key)
+				}
 				return nil, nil, err
 			}
 			data := t.(*T)
@@ -443,11 +453,8 @@ func (c *CacheRow[T]) redisSetParam(cond TableConds, dataInfo *utils.StructInfo)
 	redisParams := make([]interface{}, 0, 1+len(dataInfo.Elemts)*2)
 	redisParams = append(redisParams, c.expire)
 	for i, v := range dataInfo.Elemts {
-		if dataInfo.Tags[i] == c.incrementField {
-			continue // 忽略自增增段
-		}
-		if ok := cond.Find(dataInfo.Tags[i].(string)); ok != nil {
-			continue // 忽略条件字段
+		if c.saveIgnoreTag(dataInfo.Tags[i].(string), cond) {
+			continue
 		}
 		vfmt := utils.ValueFmt(v)
 		if vfmt == nil {
@@ -490,13 +497,8 @@ func (c *CacheRow[T]) redisModifyParam(cond TableConds, dataInfo *utils.StructIn
 	redisParams = append(redisParams, c.expire)
 	for i, v := range dataInfo.Elemts {
 		redisParams = append(redisParams, dataInfo.Tags[i])
-		if dataInfo.Tags[i] == c.incrementField {
-			redisParams = append(redisParams, "get") // 忽略自增增段写入 只读取
-			redisParams = append(redisParams, nil)
-			continue
-		}
-		if ok := cond.Find(dataInfo.Tags[i].(string)); ok != nil {
-			redisParams = append(redisParams, "get") // 忽略条件字段写入 只读取
+		if c.saveIgnoreTag(dataInfo.Tags[i].(string), cond) {
+			redisParams = append(redisParams, "get") // 忽略的字段 只读取
 			redisParams = append(redisParams, nil)
 			continue
 		}

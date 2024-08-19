@@ -11,16 +11,9 @@ import (
 	"gobase/mysql"
 	"gobase/utils"
 	"reflect"
+	"strconv"
 	"strings"
 )
-
-var ErrNullData = errors.New("null") // 空数据，即没有数据
-
-const DBTag = "db"
-
-var Expire = 36 * 3600 // 支持修改
-
-var IncrementKey = "_mrcache_increment_" // 自增key，hash结构，field使用table名
 
 // 基础类
 type Cache struct {
@@ -41,6 +34,10 @@ type Cache struct {
 	incrementField      string         // mysql中自增字段tag名 区分大小写 默认为结构表的第一个字段
 	incrementFieldIndex int            // 自增key在tableInfo中的索引
 	incrementTable      string         // 插入数据时 获取自增id的table名 拆表时 不同的表要用同一个名, 默认值为tableName
+
+	// cacherows使用
+	dataKeyField      string // 查询结果中唯一的字段tag，用来做key，区分大小写 默认为结构表的第一个字段
+	dataKeyFieldIndex int    // key在tableInfo中的索引
 
 	// 只有一个查询条件时，配置这个查询字段名，然后调用OC结尾的系列函数
 	oneCondField string // 该字段名必须在结果表中存在  区分大小写
@@ -95,6 +92,57 @@ func (c *Cache) ConfigIncrement(incrementReids *goredis.Redis, incrementField, i
 		c.incrementTable = c.tableName
 	}
 	return nil
+}
+
+// 配置数据key字段
+func (c *Cache) ConfigDataKeyField(keyField string) error {
+	// 自增字段必须存在
+	idx := c.tableInfo.FindIndexByTag(keyField)
+	if idx == -1 {
+		return fmt.Errorf("tag:%s not find in %s", keyField, c.tableInfo.T.String())
+	}
+	// 数据字段只能是基本的数据类型
+	typeOk := false
+	switch c.tableInfo.ElemtsType[idx].Kind() {
+	case reflect.Bool:
+		typeOk = true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		typeOk = true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		typeOk = true
+	case reflect.Slice:
+		if c.tableInfo.ElemtsType[idx].Elem().Kind() == reflect.Uint8 {
+			typeOk = true
+		}
+	case reflect.String:
+		typeOk = true
+	}
+	if !typeOk {
+		return fmt.Errorf("tag:%s(%s) as dataKeyField type error", keyField, c.tableInfo.T.String())
+	}
+
+	c.dataKeyField = keyField
+	c.dataKeyFieldIndex = idx
+	return nil
+}
+
+// 数据key格式化
+func (c *Cache) dataKeyValue(dataKeyValue reflect.Value) string {
+	switch dataKeyValue.Kind() {
+	case reflect.Bool:
+		return strconv.FormatBool(dataKeyValue.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(dataKeyValue.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return strconv.FormatUint(dataKeyValue.Uint(), 10)
+	case reflect.Slice:
+		if dataKeyValue.Elem().Kind() == reflect.Uint8 {
+			return utils.BytesToString(dataKeyValue.Bytes())
+		}
+	case reflect.String:
+		return dataKeyValue.String()
+	}
+	return ""
 }
 
 // 只有一个字段作为查询条件时，字段名字可以提前设置好了，然后调用OC结尾的系列函数
@@ -318,13 +366,9 @@ func (c *Cache) saveToMySQL(ctx context.Context, cond TableConds, destInfo *util
 	args := make([]interface{}, 0, len(cond)+len(destInfo.Tags))
 	num := 0
 	for i, tag := range destInfo.Tags {
-		if tag.(string) == c.incrementField {
-			continue // 忽略自增增段
+		if c.saveIgnoreTag(tag.(string), cond) {
+			continue
 		}
-		if ok := cond.Find(tag.(string)); ok != nil {
-			continue // 忽略条件字段
-		}
-
 		if num > 0 {
 			sqlStr.WriteString(",")
 		}
@@ -354,4 +398,17 @@ func (c *Cache) saveToMySQL(ctx context.Context, cond TableConds, destInfo *util
 		return ErrNullData
 	}
 	return err
+}
+
+func (c *Cache) saveIgnoreTag(tag string, cond TableConds) bool {
+	if tag == c.incrementField {
+		return true // 忽略自增字段
+	}
+	if ok := cond.Find(tag); ok != nil {
+		return true // 忽略条件字段
+	}
+	if tag == c.dataKeyField {
+		return true // 忽略数据字段
+	}
+	return false
 }

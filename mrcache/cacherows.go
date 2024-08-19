@@ -11,7 +11,6 @@ import (
 	"gobase/utils"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,15 +18,14 @@ import (
 )
 
 // T 为数据库结构类型，可重复多协程使用
-// 使用场景：查询条件只对应多个结果 redis使用多个key缓存这个结果
-// 有一个总key索引所有的数据key，索引key，为hash结果 datakeyvalue:datakey datakey命名：索引key名_dataKeyField对应的值
-// 为了效率，索引key的倒计时可能和其他数据不一致，所以如果索引中存在，数据key不存在，就重新加载
+// 使用场景：查询条件对应多个结果 redis使用多个key缓存这个结果，一条数据对应一个key
+// 索引key：有一个总key存储所有的数据key，hash结构，datakeyvalue:datakey datakey命名：索引key名_dataKeyField对应的值
+// 数据key：存储一条数据的eky，dataKey对应的存储方式和cacherow一样
+// 需要使用ConfigDataKeyField配置数据key对应的字段
+// 为了效率，索引key一直缓存所有的数据key，但数据key可能在redis中不存在时，此时就重新加载
 // 最好查询条件和dataKeyField做一个唯一索引
 type CacheRows[T any] struct {
 	*Cache
-
-	dataKeyField      string // 查询结果中唯一的字段tag，用来做key，区分大小写 默认为结构表的第一个字段
-	dataKeyFieldIndex int    // key在tableInfo中的索引
 }
 
 func NewCacheRows[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string) *CacheRows[T] {
@@ -55,61 +53,11 @@ func NewCacheRows[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName str
 	if len(sInfo.Tags) > 0 {
 		c.ConfigIncrement(redis, sInfo.Tags[0].(string), tableName)
 	}
-	// 默认配置第一个Key为key字段
+	// 默认配置第一个Key为数据key字段
 	if len(sInfo.Tags) > 0 {
 		c.ConfigDataKeyField(sInfo.Tags[0].(string))
 	}
 	return c
-}
-
-// 配置数据key字段
-func (c *CacheRows[T]) ConfigDataKeyField(keyField string) error {
-	// 自增字段必须存在
-	idx := c.tableInfo.FindIndexByTag(keyField)
-	if idx == -1 {
-		return fmt.Errorf("tag:%s not find in %s", keyField, c.tableInfo.T.String())
-	}
-	// 数据字段只能是基本的数据类型
-	typeOk := false
-	switch c.tableInfo.ElemtsType[idx].Kind() {
-	case reflect.Bool:
-		typeOk = true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		typeOk = true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		typeOk = true
-	case reflect.Slice:
-		if c.tableInfo.ElemtsType[idx].Elem().Kind() == reflect.Uint8 {
-			typeOk = true
-		}
-	case reflect.String:
-		typeOk = true
-	}
-	if !typeOk {
-		return fmt.Errorf("tag:%s(%s) as dataKeyField type error", keyField, c.tableInfo.T.String())
-	}
-
-	c.dataKeyField = keyField
-	c.dataKeyFieldIndex = idx
-	return nil
-}
-
-func (c *CacheRows[T]) dataKeyValue(dataKeyValue reflect.Value) string {
-	switch dataKeyValue.Kind() {
-	case reflect.Bool:
-		return strconv.FormatBool(dataKeyValue.Bool())
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(dataKeyValue.Int(), 10)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return strconv.FormatUint(dataKeyValue.Uint(), 10)
-	case reflect.Slice:
-		if dataKeyValue.Elem().Kind() == reflect.Uint8 {
-			return utils.BytesToString(dataKeyValue.Bytes())
-		}
-	case reflect.String:
-		return dataKeyValue.String()
-	}
-	return ""
 }
 
 // 读取数据
@@ -135,6 +83,11 @@ func (c *CacheRows[T]) GetAll(ctx context.Context, cond TableConds) ([]*T, error
 	if err == nil {
 		return dest, nil
 	} else if err == ErrNullData {
+		if IsPass(key) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("GetAll error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("GetAll error")
@@ -213,6 +166,11 @@ func (c *CacheRows[T]) Get(ctx context.Context, cond TableConds, dataKeyValue in
 	if err == nil {
 		return dest, nil
 	} else if goredis.IsNilError(err) {
+		if IsPass(dataKey) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
@@ -220,7 +178,7 @@ func (c *CacheRows[T]) Get(ctx context.Context, cond TableConds, dataKeyValue in
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, _, err := c.preLoad(ctx, cond, key, dataKeyValue, false, nil)
+	preData, _, err := c.preLoad(ctx, cond, key, dataKey, dataKeyValue, false, nil)
 	if err == ErrNullData {
 		return nil, err // 空数据直接返回
 	}
@@ -305,6 +263,11 @@ func (c *CacheRows[T]) Set(ctx context.Context, cond TableConds, data interface{
 	if err == nil {
 		return nil, nil
 	} else if err == ErrNullData {
+		if IsPass(dataKey) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
@@ -312,7 +275,7 @@ func (c *CacheRows[T]) Set(ctx context.Context, cond TableConds, data interface{
 	}
 
 	// 预加载 尝试从数据库中读取
-	_, incrValue, err := c.preLoad(ctx, cond, key, dataKeyValue, nc, dataInfo)
+	_, incrValue, err := c.preLoad(ctx, cond, key, dataKey, dataKeyValue, nc, dataInfo)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Set error")
 		return nil, err
@@ -397,6 +360,11 @@ func (c *CacheRows[T]) Modify(ctx context.Context, cond TableConds, data interfa
 	if err == nil {
 		return res, nil
 	} else if err == ErrNullData {
+		if IsPass(dataKey) {
+			err := fmt.Errorf("%s is pass", key)
+			utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
+			return nil, err
+		}
 		// 不处理执行下面的预加载
 	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
@@ -404,7 +372,7 @@ func (c *CacheRows[T]) Modify(ctx context.Context, cond TableConds, data interfa
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, incrValue, err := c.preLoad(ctx, cond, key, dataKeyValue, nc, dataInfo)
+	preData, incrValue, err := c.preLoad(ctx, cond, key, dataKey, dataKeyValue, nc, dataInfo)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Modify error")
 		return nil, err
@@ -445,15 +413,14 @@ func (c *CacheRows[T]) ModifyOC(ctx context.Context, condValue interface{}, data
 	return c.Modify(ctx, NewConds().Eq(c.oneCondField, condValue), data, nc)
 }
 
-// 检查条件，返回redis缓存key列表，key列表的大小和c.tableInfo.Tags一一对应
-// 第一个key为主key，用来判断是否有缓存的key
-// key格式：mrrs_表名_字段名_{condValue1}_condValue2  如果CacheRow.hashTagField == condValue1 condValue1会添加上{}
+// 检查条件，返回索引key
+// key格式：mrrs_表名_{condValue1}_condValue2  如果CacheRow.hashTagField == condValue1 condValue1会添加上{}
 func (c *CacheRows[T]) checkCond(cond TableConds) (string, error) {
 	if len(cond) == 0 {
 		return "", errors.New("cond is nil")
 	}
 
-	// 必须要设置数据key，
+	// 必须要设置数据key
 	if len(c.dataKeyField) == 0 {
 		return "", errors.New("dataKeyField is nil")
 	}
@@ -477,24 +444,16 @@ func (c *CacheRows[T]) checkCond(cond TableConds) (string, error) {
 		}
 	}
 
-	// 优化效率
-	if len(cond) == 1 {
-		for _, v := range cond {
-			if c.hashTagField == v.field {
-				return fmt.Sprintf("mrrs_%s_{%v}", c.tableName, v.value), nil
-			} else {
-				return fmt.Sprintf("mrrs_%s_%v", c.tableName, v.value), nil
-			}
-		}
+	temp := cond
+	if len(cond) > 1 {
+		// 根据field排序，不要影响cond，拷贝一份
+		temp = make(TableConds, len(cond))
+		copy(temp, cond)
+		sort.Slice(temp, func(i, j int) bool { return temp[i].field < temp[j].field })
 	}
 
-	// 根据field排序
-	temp := make(TableConds, len(cond))
-	copy(temp, cond)
-	sort.Slice(temp, func(i, j int) bool { return temp[i].field < temp[j].field })
-
 	var key strings.Builder
-	key.WriteString("mrrs_" + c.tableName)
+	key.WriteString(KeyPrefix + "mrrs_" + c.tableName)
 	for _, v := range temp {
 		if v.field == c.hashTagField {
 			key.WriteString(fmt.Sprintf("_{%v}", v.value))
@@ -524,6 +483,9 @@ func (c *CacheRows[T]) preLoadAll(ctx context.Context, cond TableConds, key stri
 func (c *CacheRows[T]) mysqlAllToRedis(ctx context.Context, cond TableConds, key string) ([]*T, error) {
 	t, err := c.getsFromMySQL(ctx, c.tableInfo.TS, c.tableInfo.Tags, cond)
 	if err != nil {
+		if err == ErrNullData {
+			SetPass(key)
+		}
 		return nil, err
 	}
 	data := t.([]*T)
@@ -579,7 +541,7 @@ func (c *CacheRows[T]) mysqlAllToRedis(ctx context.Context, cond TableConds, key
 // *T： 因为加载时抢占式的，!= nil 表示是本逻辑执行了加载，否则没有执行加载
 // interface{} != nil时 表示产生的自增id 创建时才返回
 // error： 执行结果
-func (c *CacheRows[T]) preLoad(ctx context.Context, cond TableConds, key string, dataKeyValue interface{}, nc bool, dataInfo *utils.StructInfo) (*T, interface{}, error) {
+func (c *CacheRows[T]) preLoad(ctx context.Context, cond TableConds, key, dataKey string, dataKeyValue interface{}, nc bool, dataInfo *utils.StructInfo) (*T, interface{}, error) {
 	// 根据是否要创建数据，来判断使用什么锁
 	if nc {
 		// 不存在要创建数据
@@ -604,7 +566,7 @@ func (c *CacheRows[T]) preLoad(ctx context.Context, cond TableConds, key string,
 		}
 
 		// 加载
-		t, err := c.mysqlToRedis(ctx, cond, key, dataKeyValue)
+		t, err := c.mysqlToRedis(ctx, cond, key, dataKey, dataKeyValue)
 		return t, incrValue, err
 	} else {
 		// 不用创建
@@ -612,17 +574,20 @@ func (c *CacheRows[T]) preLoad(ctx context.Context, cond TableConds, key string,
 		if err == nil && unlock != nil {
 			defer unlock()
 			// 加载
-			t, err := c.mysqlToRedis(ctx, cond, key, dataKeyValue)
+			t, err := c.mysqlToRedis(ctx, cond, key, dataKey, dataKeyValue)
 			return t, nil, err
 		}
 		return nil, nil, nil
 	}
 }
 
-func (c *CacheRows[T]) mysqlToRedis(ctx context.Context, cond TableConds, key string, dataKeyValue interface{}) (*T, error) {
+func (c *CacheRows[T]) mysqlToRedis(ctx context.Context, cond TableConds, key, dataKey string, dataKeyValue interface{}) (*T, error) {
 	// 先查询到要读取的数据
 	t, err := c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond.Eq(c.dataKeyField, dataKeyValue))
 	if err != nil {
+		if err == ErrNullData {
+			SetPass(key)
+		}
 		return nil, err
 	}
 	// 查询所有的dataValue，只读取dataKeyField对应的值，最好控制好正常覆盖索引就可以读取所有的数了
@@ -631,7 +596,7 @@ func (c *CacheRows[T]) mysqlToRedis(ctx context.Context, cond TableConds, key st
 		return nil, err
 	}
 
-	dataKeys := []string{key, key + "_" + fmt.Sprint(dataKeyValue)}
+	dataKeys := []string{key, dataKey}
 	data := t.(*T)
 	allKeyData := allKeyT.([]*T)
 
@@ -644,7 +609,7 @@ func (c *CacheRows[T]) mysqlToRedis(ctx context.Context, cond TableConds, key st
 		tInfo, _ := utils.GetStructInfoByTag(d, DBTag)
 		dataKeyValue := utils.ValueFmt(tInfo.Elemts[c.dataKeyFieldIndex])
 		redisParams = append(redisParams, dataKeyValue)
-		redisParams = append(redisParams, key+"_"+fmt.Sprint(dataKeyValue))
+		redisParams = append(redisParams, dataKey)
 	}
 	// 数据key
 	tInfo, _ := utils.GetStructInfoByTag(data, DBTag)
@@ -723,14 +688,8 @@ func (c *CacheRows[T]) redisSetParam(cond TableConds, dataInfo *utils.StructInfo
 	redisParams := make([]interface{}, 0, 1+len(dataInfo.Elemts)*2)
 	redisParams = append(redisParams, c.expire)
 	for i, v := range dataInfo.Elemts {
-		if dataInfo.Tags[i] == c.incrementField {
-			continue // 忽略自增增段
-		}
-		if ok := cond.Find(dataInfo.Tags[i].(string)); ok != nil {
-			continue // 忽略条件字段
-		}
-		if dataInfo.Tags[i] == c.dataKeyField {
-			continue // 忽略数据字段
+		if c.saveIgnoreTag(dataInfo.Tags[i].(string), cond) {
+			continue
 		}
 		vfmt := utils.ValueFmt(v)
 		if vfmt == nil {
@@ -773,18 +732,8 @@ func (c *CacheRows[T]) redisModifyParam(cond TableConds, dataInfo *utils.StructI
 	redisParams = append(redisParams, c.expire)
 	for i, v := range dataInfo.Elemts {
 		redisParams = append(redisParams, dataInfo.Tags[i])
-		if dataInfo.Tags[i] == c.incrementField {
-			redisParams = append(redisParams, "get") // 忽略自增增段写入 只读取
-			redisParams = append(redisParams, nil)
-			continue
-		}
-		if ok := cond.Find(dataInfo.Tags[i].(string)); ok != nil {
-			redisParams = append(redisParams, "get") // 忽略条件字段写入 只读取
-			redisParams = append(redisParams, nil)
-			continue
-		}
-		if dataInfo.Tags[i] == c.dataKeyField {
-			redisParams = append(redisParams, "get") // 忽略数据字段写入 只读取
+		if c.saveIgnoreTag(dataInfo.Tags[i].(string), cond) {
+			redisParams = append(redisParams, "get") // 忽略的字段 只读取
 			redisParams = append(redisParams, nil)
 			continue
 		}
