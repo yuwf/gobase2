@@ -124,6 +124,39 @@ func BenchmarkRowModify(b *testing.B) {
 	fmt.Println(user, err)
 }
 
+func BenchmarkRowsGetAll(b *testing.B) {
+	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
+	if err != nil {
+		return
+	}
+
+	redis, err := goredis.InitDefaultRedis(redisCfg)
+	if err != nil {
+		return
+	}
+
+	cache := NewCacheRows[Test](redis, mysql, "test")
+	err = cache.ConfigHashTag("UID")
+	if err != nil {
+		return
+	}
+	err = cache.ConfigIncrement(redis, "Id", "Name")
+	if err != nil {
+		return
+	}
+	err = cache.ConfigDataKeyField("Type")
+	if err != nil {
+		return
+	}
+	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
+	if err != nil {
+		return
+	}
+
+	user, err := cache.GetAll(context.TODO(), NewConds().Eq("UID", 123))
+	fmt.Println(user, err)
+}
+
 func BenchmarkRowsGet(b *testing.B) {
 	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
 	if err != nil {
@@ -153,9 +186,10 @@ func BenchmarkRowsGet(b *testing.B) {
 		return
 	}
 
-	user, err := cache.Get(context.TODO(), NewConds().Eq("UID", 123))
+	user, err := cache.Get(context.TODO(), NewConds().Eq("UID", 123), 8)
 	fmt.Println(user, err)
 }
+
 
 func BenchmarkRowsSet(b *testing.B) {
 	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)

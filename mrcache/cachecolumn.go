@@ -582,7 +582,7 @@ func (c *CacheColumn[T]) preLoad(ctx context.Context, cond TableConds, keys []st
 		defer unlock()
 
 		// 查询mysql是否存在这条数据
-		_, err = c.getFromMySQL(ctx, cond.Eq(c.incrementField, ncId)) // 此处用get函数
+		_, err = c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond.Eq(c.incrementField, ncId)) // 此处用get函数
 		if err != nil && err != ErrNullData {
 			return nil, nil, err
 		}
@@ -612,7 +612,7 @@ func (c *CacheColumn[T]) preLoad(ctx context.Context, cond TableConds, keys []st
 }
 
 func (c *CacheColumn[T]) mysqlToRedis(ctx context.Context, cond TableConds, keys []string) ([]*T, error) {
-	t, err := c.getsFromMySQL(ctx, cond)
+	t, err := c.getsFromMySQL(ctx, c.tableInfo.TS, c.tableInfo.Tags, cond)
 	if err != nil {
 		return nil, err
 	}

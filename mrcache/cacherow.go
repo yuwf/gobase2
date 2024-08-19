@@ -77,6 +77,11 @@ func (c *CacheRow[T]) Get(ctx context.Context, cond TableConds) (*T, error) {
 	err = c.redis.DoScript2(ctx, rowGetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
 	if err == nil {
 		return dest, nil
+	} else if goredis.IsNilError(err) {
+		// 不处理执行下面的预加载
+	} else {
+		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
+		return nil, err
 	}
 
 	// 预加载 尝试从数据库中读取
@@ -96,11 +101,14 @@ func (c *CacheRow[T]) Get(ctx context.Context, cond TableConds) (*T, error) {
 	dest = new(T) // 防止上面的数据有干扰
 	destInfo, _ = utils.GetStructInfoByTag(dest, DBTag)
 	err = c.redis.DoScript2(ctx, rowGetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
-	if err != nil {
+	if err == nil {
+		return dest, nil
+	} else if err == ErrNullData {
+		return nil, ErrNullData
+	} else {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Get error")
 		return nil, err
 	}
-	return dest, nil
 }
 
 // 使用该函数需要提前使用ConfigOneCondField配置相关内容
@@ -334,7 +342,8 @@ func (c *CacheRow[T]) checkCond(cond TableConds) (string, error) {
 
 // 预加载，确保写到Redis中
 // key：用来加锁的key
-// nc：加载不存在是否创建
+// nc：不存在是否创建
+// 返回值
 // *T： 因为加载时抢占式的，!= nil 表示是本逻辑执行了加载，否则没有执行加载
 // error： 执行结果
 func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, nc bool, dataInfo *utils.StructInfo) (*T, interface{}, error) {
@@ -348,7 +357,7 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, 
 		defer unlock()
 
 		var incrValue interface{}
-		t, err := c.getFromMySQL(ctx, cond)
+		t, err := c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond)
 		if err == ErrNullData {
 			// 创建数据
 			incrValue, err = c.addToMySQL(ctx, cond, dataInfo)
@@ -356,7 +365,7 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, 
 				return nil, nil, err
 			}
 			// 重新加载下
-			t, err = c.getFromMySQL(ctx, cond)
+			t, err = c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -375,7 +384,7 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, cond TableConds, key string, 
 		unlock, err := c.redis.TryLockWait(context.WithValue(context.TODO(), goredis.CtxKey_nolog, 1), "lock_"+key, time.Second*8)
 		if err == nil && unlock != nil {
 			defer unlock()
-			t, err := c.getFromMySQL(ctx, cond)
+			t, err := c.getFromMySQL(ctx, c.tableInfo.T, c.tableInfo.Tags, cond)
 			if err != nil {
 				return nil, nil, err
 			}

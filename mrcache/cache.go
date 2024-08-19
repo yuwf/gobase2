@@ -213,11 +213,12 @@ func (c *Cache) addToMySQL(ctx context.Context, cond TableConds, dataInfo *utils
 }
 
 // 读取mysql数据 返回的是 *T
-func (c *Cache) getFromMySQL(ctx context.Context, cond TableConds) (interface{}, error) {
+// fields表示读取的字段名，内部为string类型
+func (c *Cache) getFromMySQL(ctx context.Context, T reflect.Type, fields []interface{}, cond TableConds) (interface{}, error) {
 	var sqlStr strings.Builder
 	sqlStr.WriteString("SELECT ")
 
-	for i, tag := range c.tableInfo.Tags {
+	for i, tag := range fields {
 		if i > 0 {
 			sqlStr.WriteString(",")
 		}
@@ -247,7 +248,7 @@ func (c *Cache) getFromMySQL(ctx context.Context, cond TableConds) (interface{},
 		args = append(args, v.value)
 	}
 
-	t := reflect.New(c.tableInfo.T)
+	t := reflect.New(T)
 	err := c.mysql.Get(ctx, t.Interface(), sqlStr.String(), args...)
 
 	if err == sql.ErrNoRows {
@@ -259,12 +260,13 @@ func (c *Cache) getFromMySQL(ctx context.Context, cond TableConds) (interface{},
 	return t.Interface(), nil
 }
 
-// 读取mysql数据 返回的是 []*T
-func (c *Cache) getsFromMySQL(ctx context.Context, cond TableConds) (interface{}, error) {
+// 读取mysql数据 返回的是 *TS，要求是T必须是slice类型
+// fields表示读取的字段名，内部为string类型
+func (c *Cache) getsFromMySQL(ctx context.Context, TS reflect.Type, fields []interface{}, cond TableConds) (interface{}, error) {
 	var sqlStr strings.Builder
 	sqlStr.WriteString("SELECT ")
 
-	for i, tag := range c.tableInfo.Tags {
+	for i, tag := range fields {
 		if i > 0 {
 			sqlStr.WriteString(",")
 		}
@@ -294,7 +296,7 @@ func (c *Cache) getsFromMySQL(ctx context.Context, cond TableConds) (interface{}
 		args = append(args, v.value)
 	}
 
-	t := reflect.New(c.tableInfo.TS)
+	t := reflect.New(TS)
 	err := c.mysql.Select(ctx, t.Interface(), sqlStr.String(), args...)
 
 	if err == sql.ErrNoRows {

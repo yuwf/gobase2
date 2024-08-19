@@ -75,7 +75,7 @@ var rowModifyScript = goredis.NewScript(`
 // rows 读取数据，第一个key为索引key，redis不存在说明数据为空
 // 第一个参数是有效期 其他：field field ..
 // 返回值 err=nil时 1:空 数据为空  2:{value value ..} {value value ..} .. {}的个数为结果数量 每个{value value}的和上面的field对应，不存在对应的Value填充nil
-var rowsGetScript = goredis.NewScript(`
+var rowsGetAllScript = goredis.NewScript(`
 	-- 先判断主key是否存在
 	local rst = redis.call('EXPIRE', KEYS[1], ARGV[1])
 	if rst == 0 then
@@ -92,6 +92,19 @@ var rowsGetScript = goredis.NewScript(`
 		resp[i] = redis.call('HMGET', datakeys[i], select(2,unpack(ARGV)))
 	end
 	return resp
+`)
+
+// rows 读取数据，第一个key为索引key，第二个为数据key, datakey不存在返回值为空
+// 第一个参数是有效期 其他：field field ..
+// 返回值 err=nil时 1：空：没加载数据 2：value value .. 和上面field对应
+var rowsGetScript = goredis.NewScript(`
+	local rst = redis.call('EXPIRE', KEYS[2], ARGV[1])
+	if rst == 0 then
+		return
+	end
+	-- 设置索引key的倒计时
+	redis.call('EXPIRE', KEYS[1], ARGV[1])
+	return redis.call('HMGET', KEYS[2], select(2,unpack(ARGV)))
 `)
 
 // rows 新增数据，直接保存，总key放第一个位置
