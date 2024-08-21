@@ -2,23 +2,14 @@ package mrcache
 
 import (
 	"context"
-	"fmt"
 	"gobase/goredis"
 	"gobase/mysql"
 	"testing"
-	"time"
 
 	_ "gobase/log"
+
+	"github.com/rs/zerolog/log"
 )
-
-var mysqlCfg = &mysql.Config{
-	Source: "root:1235@tcp(localhost:3306)/test?charset=utf8",
-}
-
-var redisCfg = &goredis.Config{
-	Addrs:  []string{"127.0.0.1:6379"},
-	Passwd: "1235",
-}
 
 // db中
 type Test struct {
@@ -30,45 +21,85 @@ type Test struct {
 	T    *string `db:"T"json:"T,omitempty"`       //测试时间
 }
 
+func init() {
+
+	var mysqlCfg = &mysql.Config{
+		Source: "root:1235@tcp(localhost:3306)/test?charset=utf8",
+	}
+
+	var redisCfg = &goredis.Config{
+		Addrs:  []string{"127.0.0.1:6379"},
+		Passwd: "1235",
+	}
+
+	_, err := mysql.InitDefaultMySQL(mysqlCfg)
+	if err != nil {
+		return
+	}
+
+	_, err = mysql.DefaultMySQL().Exec(context.TODO(), "CREATE DATABASE IF NOT EXISTS test")
+	if err != nil {
+		return
+	}
+
+	_, err = mysql.DefaultMySQL().Exec(context.TODO(), "USE test")
+	if err != nil {
+		return
+	}
+
+	sql := `
+	CREATE TABLE IF NOT EXISTS test (
+		Id bigint NOT NULL AUTO_INCREMENT COMMENT '自增住建',
+		UID bigint NOT NULL DEFAULT '0' COMMENT '用户ID',
+		Type int NOT NULL DEFAULT '0',
+		Name varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '""' COMMENT '名字',
+		Age int DEFAULT NULL COMMENT '年龄',
+		T time DEFAULT NULL COMMENT '测试时间',
+		PRIMARY KEY (Id),
+		UNIQUE KEY uk_UID_Type (UID,Type)
+	) ENGINE=InnoDB AUTO_INCREMENT=11019 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+	`
+	_, err = mysql.DefaultMySQL().Exec(context.TODO(), sql)
+	if err != nil {
+		return
+	}
+
+	_, err = goredis.InitDefaultRedis(redisCfg)
+	if err != nil {
+		return
+	}
+}
+
 func BenchmarkRowGet(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
-		return
-	}
-
-	cache := NewCacheRow[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
 
 	user, err := cache.Get(context.TODO(), NewConds().Eq("UID", 123))
-	fmt.Println(user, err)
+	log.Info().Err(err).Interface("user", user).Msg("Get")
 }
 
 func BenchmarkRowSet(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRow[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "test")
 	if err != nil {
-		return
-	}
-	err = cache.ConfigIncrement(redis, "Id", "test")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 
@@ -79,69 +110,120 @@ func BenchmarkRowSet(b *testing.B) {
 
 	//a := 10
 	s := &SetTest{
-		Name: "好17uu7u",
-		Age:  20,
+		Name: "好u",
+		Age:  50,
 	}
 
-	incrValue, err := cache.Set(context.TODO(), NewConds().Eq("UID", 126), s, true)
+	user, incrValue, err := cache.Set(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 9), s, true)
 
-	fmt.Println(incrValue, err)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Set")
 }
 
-func BenchmarkRowModify(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+func BenchmarkRowSet2(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRow[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "test")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 
 	type SetTest struct {
 		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+	}
+
+	//a := 10
+	s := &SetTest{
+		Name: "好17u7u8888",
+		Age:  20,
+	}
+
+	incrValue, err := cache.Set2(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 8), s, true)
+
+	log.Info().Err(err).Interface("incrValue", incrValue).Msg("Set2")
+}
+
+func BenchmarkRowModify(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+	cache := NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
+		return
+	}
+
+	type ModifyTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
 		Age  *int   `db:"Age"json:"Age,omitempty"`   //年龄
 	}
 
 	a := 10
-	ss := time.Now().Format(time.TimeOnly)
-	s := &Test{
-		Id:   7015,
-		Name: "好12ppp32",
+	//ss := time.Now().Format(time.TimeOnly)
+	s := &ModifyTest{
+		Name: "99999",
 		Age:  &a,
-		T:    &ss,
 	}
 
-	user, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123).Eq("Id", 7015), s, true)
+	user, incrValue, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123).Eq("Type", 8), s, false)
 
-	fmt.Println(user, err)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Modify")
+}
+
+func BenchmarkRowModify2(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+	cache := NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
+		return
+	}
+
+	type ModifyTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  *int   `db:"Age"json:"Age,omitempty"`   //年龄
+	}
+
+	a := 10
+	//ss := time.Now().Format(time.TimeOnly)
+	s := &ModifyTest{
+		Name: "88888",
+		Age:  &a,
+	}
+
+	user, incrValue, err := cache.Modify2(context.TODO(), NewConds().Eq("UID", 123).Eq("Type", 8), s, false)
+
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Modify")
 }
 
 func BenchmarkRowsGetAll(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRows[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
 	if err != nil {
-		return
-	}
-	err = cache.ConfigIncrement(redis, "Id", "Name")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 	err = cache.ConfigDataKeyField("Type")
@@ -154,31 +236,29 @@ func BenchmarkRowsGetAll(b *testing.B) {
 	}
 
 	user, err := cache.GetAll(context.TODO(), NewConds().Eq("UID", 123))
-	fmt.Println(user, err)
+
+	log.Info().Err(err).Interface("user", user).Msg("GetAll")
 }
 
 func BenchmarkRowsGet(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRows[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
 	if err != nil {
-		return
-	}
-	err = cache.ConfigIncrement(redis, "Id", "Name")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 	err = cache.ConfigDataKeyField("Type")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigDataKeyField Err")
 		return
 	}
 	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
@@ -187,31 +267,28 @@ func BenchmarkRowsGet(b *testing.B) {
 	}
 
 	user, err := cache.Get(context.TODO(), NewConds().Eq("UID", 123), 8)
-	fmt.Println(user, err)
+	log.Info().Err(err).Interface("user", user).Msg("Get")
 }
 
 func BenchmarkRowsSet(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRows[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
 	if err != nil {
-		return
-	}
-	err = cache.ConfigIncrement(redis, "Id", "Name")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 	err = cache.ConfigDataKeyField("Type")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigDataKeyField Err")
 		return
 	}
 	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
@@ -220,46 +297,42 @@ func BenchmarkRowsSet(b *testing.B) {
 	}
 
 	type SetTest struct {
-		Id   int    `db:"Id"json:"Id,omitempty"`     //自增住建  不可为空
-		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Name string `db:"Name"json:"Name,omitempty"` //名字
 		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
-		Type int    `db:"Type"json:"Age,omitempty"`  //年龄
+		Type int    `db:"Type"json:"Type,omitempty"` //数据字段
 	}
 
 	//a := 10
 	s := &SetTest{
-		Id:   8015,
-		Name: "name8015",
-		Age:  100,
+		Name: "name==",
+		Age:  10000,
+		Type: 12,
 	}
 
-	incrValue, err := cache.Set(context.TODO(), NewConds().Eq("UID", 123), s, true)
+	user, incrValue, err := cache.Set(context.TODO(), NewConds().Eq("UID", 123), s, true)
 
-	fmt.Println(incrValue, err)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Set")
 }
 
-func BenchmarkRowsModify(b *testing.B) {
-	mysql, err := mysql.InitDefaultMySQL(mysqlCfg)
-	if err != nil {
+func BenchmarkRowsSet2(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
 		return
 	}
-
-	redis, err := goredis.InitDefaultRedis(redisCfg)
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-
-	cache := NewCacheRows[Test](redis, mysql, "test")
-	err = cache.ConfigHashTag("UID")
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
 	if err != nil {
-		return
-	}
-	err = cache.ConfigIncrement(redis, "Id", "Name")
-	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 	err = cache.ConfigDataKeyField("Type")
 	if err != nil {
+		log.Error().Err(err).Msg("ConfigDataKeyField Err")
 		return
 	}
 	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
@@ -267,22 +340,109 @@ func BenchmarkRowsModify(b *testing.B) {
 		return
 	}
 
-	type ModifyTest struct {
-		Id   int    `db:"Id"json:"Id,omitempty"`     //自增住建  不可为空
+	type SetTest struct {
 		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
 		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
-		Type int    `db:"Type"json:"Age,omitempty"`  //年龄
+		Type int    `db:"Type"json:"Type,omitempty"` //数据字段
+	}
+
+	//a := 10
+	s := &SetTest{
+		Name: "name8015",
+		Age:  100,
+	}
+
+	incrValue, err := cache.Set2(context.TODO(), NewConds().Eq("UID", 123), s, true)
+
+	log.Info().Err(err).Interface("incrValue", incrValue).Msg("Set")
+}
+
+func BenchmarkRowsModify(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
+		return
+	}
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
+		return
+	}
+	err = cache.ConfigDataKeyField("Type")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigDataKeyField Err")
+		return
+	}
+	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigQueryCond Err")
+		return
+	}
+
+	type ModifyTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+		Type int    `db:"Type"json:"Type,omitempty"` //年龄
 	}
 
 	//a := 10
 	s := &ModifyTest{
-		Id:   8022,
 		Name: "namenamen8022",
 		Age:  1000,
 		Type: 10,
 	}
 
-	incrValue, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123), s, true)
+	user, incrValue, err := cache.Modify(context.TODO(), NewConds().Eq("UID", 123), s, true)
 
-	fmt.Println(incrValue, err)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Modify")
+}
+
+func BenchmarkRowsModify2(b *testing.B) {
+	if goredis.DefaultRedis() == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+	cache := NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	err := cache.ConfigHashTag("UID")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigHashTag Err")
+		return
+	}
+	err = cache.ConfigIncrement(goredis.DefaultRedis(), "Id", "Name")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigIncrement Err")
+		return
+	}
+	err = cache.ConfigDataKeyField("Type")
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigDataKeyField Err")
+		return
+	}
+	err = cache.ConfigQueryCond(NewConds().Ge("Age", 20))
+	if err != nil {
+		log.Error().Err(err).Msg("ConfigQueryCond Err")
+		return
+	}
+
+	type ModifyTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+		Type int    `db:"Type"json:"Type,omitempty"` //年龄
+	}
+
+	//a := 10
+	s := &ModifyTest{
+		Name: "namenamen",
+		Age:  1000,
+		Type: 10,
+	}
+
+	user, incrValue, err := cache.Modify2(context.TODO(), NewConds().Eq("UID", 123), s, true)
+
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Modify")
 }

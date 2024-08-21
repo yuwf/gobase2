@@ -5,7 +5,6 @@ package mrcache
 import (
 	"errors"
 	"sync"
-	"time"
 )
 
 var ErrNullData = errors.New("null") // 空数据，即没有数据
@@ -24,17 +23,18 @@ var IncrementKey = "_mrcache_increment_" // 自增key，hash结构，field使用
 var passCache sync.Map
 
 func IsPass(key string) bool {
-	passTime, ok := passCache.Load(key)
-	if !ok {
-		return false
-	}
-	if passTime.(int64) >= time.Now().Unix()+30 {
-		passCache.Delete(key)
-		return false
-	}
-	return true
+	return false //  逻辑不合理 待完善
+	// passTime, ok := passCache.Load(key)
+	// if !ok {
+	// 	return false
+	// }
+	// if passTime.(int64) >= time.Now().Unix()+30 {
+	// 	passCache.Delete(key)
+	// 	return false
+	// }
+	// return true
 }
 
 func SetPass(key string) {
-	passCache.Store(key, time.Now().Unix())
+	//passCache.Store(key, time.Now().Unix())
 }

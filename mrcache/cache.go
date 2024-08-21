@@ -40,7 +40,8 @@ type Cache struct {
 	dataKeyFieldIndex int    // key在tableInfo中的索引
 
 	// 只有一个查询条件时，配置这个查询字段名，然后调用OC结尾的系列函数
-	oneCondField string // 该字段名必须在结果表中存在  区分大小写
+	oneCondField      string // 该字段名必须在结果表中存在  区分大小写
+	oneCondFieldIndex int
 
 	queryCond TableConds // 查找数据总过滤条件
 
@@ -148,9 +149,13 @@ func (c *Cache) dataKeyValue(dataKeyValue reflect.Value) string {
 // 只有一个字段作为查询条件时，字段名字可以提前设置好了，然后调用OC结尾的系列函数
 func (c *Cache) ConfigOneCondField(oneCondField string) error {
 	// 字段必须存在
-	if c.tableInfo.FindIndexByTag(oneCondField) == -1 {
-		return fmt.Errorf("tag:%s not find in %s", oneCondField, c.tableInfo.T.String())
+	idx := c.tableInfo.FindIndexByTag(oneCondField)
+	if idx == -1 {
+		err := fmt.Errorf("tag:%s not find in %s", oneCondField, c.tableInfo.T.String())
+		return err
 	}
+	c.oneCondField = oneCondField
+	c.oneCondFieldIndex = idx
 	return nil
 }
 
@@ -186,9 +191,11 @@ func (c *Cache) checkData(data interface{}) (*utils.StructInfo, error) {
 // 往MySQL中添加一条数据，返回自增值，如果条件是=的，会设置为默认值
 func (c *Cache) addToMySQL(ctx context.Context, cond TableConds, dataInfo *utils.StructInfo) (int64, error) {
 	var incrementId int64
-	if at := dataInfo.FindIndexByTag(c.incrementField); at != -1 {
-		// 如果结构中有自增字段，优先使用
-		incrementId = dataInfo.Elemts[at].Int()
+	if dataInfo != nil {
+		if at := dataInfo.FindIndexByTag(c.incrementField); at != -1 {
+			// 如果结构中有自增字段，优先使用
+			incrementId = dataInfo.Elemts[at].Int()
+		}
 	}
 	if incrementId == 0 && len(c.incrementTable) != 0 {
 		// 如果配置了自增 先获取自增id
@@ -377,6 +384,9 @@ func (c *Cache) saveToMySQL(ctx context.Context, cond TableConds, destInfo *util
 		sqlStr.WriteString("=?")
 		args = append(args, destInfo.Elemts[i].Interface())
 	}
+	if num == 0 {
+		return nil // 没啥可更新的
+	}
 	sqlStr.WriteString(" WHERE ")
 
 	for i, v := range cond {
@@ -411,4 +421,84 @@ func (c *Cache) saveIgnoreTag(tag string, cond TableConds) bool {
 		return true // 忽略数据字段
 	}
 	return false
+}
+
+// 组织redis数据，第一个是过期时间，其他就是 field op value field op value ..
+// 返回值是真个T结构的值
+func (c *Cache) redisModifyParam1(cond TableConds, dataInfo *utils.StructInfo, numIncr bool) []interface{} {
+	redisParams := make([]interface{}, 0, 1+len(c.tableInfo.Tags)*3)
+	redisParams = append(redisParams, c.expire)
+	for _, tag := range c.tableInfo.Tags {
+		redisParams = append(redisParams, tag)
+		if c.saveIgnoreTag(tag.(string), cond) {
+			redisParams = append(redisParams, "get") // 忽略的字段 只读取
+			redisParams = append(redisParams, nil)
+			continue
+		}
+		idx := dataInfo.FindIndexByTag(tag)
+		if idx == -1 {
+			redisParams = append(redisParams, "get") // 只读取
+			redisParams = append(redisParams, nil)
+			continue
+		}
+		vfmt := utils.ValueFmt(dataInfo.Elemts[idx])
+		if vfmt == nil {
+			redisParams = append(redisParams, "get") // 只读取
+			redisParams = append(redisParams, nil)
+			continue // 空的不填充，redis处理空会写成string类型，后续incr会出错
+		}
+		if numIncr {
+			switch reflect.ValueOf(vfmt).Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				fallthrough
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				redisParams = append(redisParams, "incr") // 数值都是增量
+			case reflect.Float32, reflect.Float64:
+				redisParams = append(redisParams, "fincr") // 数值都是增量
+			default:
+				redisParams = append(redisParams, "set") // 其他都是直接设置
+			}
+		} else {
+			redisParams = append(redisParams, "set")
+		}
+		redisParams = append(redisParams, vfmt)
+	}
+	return redisParams
+}
+
+// 组织redis数据，第一个是过期时间，其他就是 field op value field op value ..
+// 返回值是dataInfo.T结构的值
+func (c *Cache) redisModifyParam2(cond TableConds, dataInfo *utils.StructInfo, numIncr bool) []interface{} {
+	redisParams := make([]interface{}, 0, 1+len(dataInfo.Elemts)*3)
+	redisParams = append(redisParams, c.expire)
+	for i, v := range dataInfo.Elemts {
+		redisParams = append(redisParams, dataInfo.Tags[i])
+		if c.saveIgnoreTag(dataInfo.Tags[i].(string), cond) {
+			redisParams = append(redisParams, "get") // 忽略的字段 只读取
+			redisParams = append(redisParams, nil)
+			continue
+		}
+		vfmt := utils.ValueFmt(v)
+		if vfmt == nil {
+			redisParams = append(redisParams, "get") // 空的不填充 读取下
+			redisParams = append(redisParams, nil)
+			continue
+		}
+		if numIncr {
+			switch reflect.ValueOf(vfmt).Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				fallthrough
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				redisParams = append(redisParams, "incr") // 数值都是增量
+			case reflect.Float32, reflect.Float64:
+				redisParams = append(redisParams, "fincr") // 数值都是增量
+			default:
+				redisParams = append(redisParams, "set") // 其他都是直接设置
+			}
+		} else {
+			redisParams = append(redisParams, "set")
+		}
+		redisParams = append(redisParams, vfmt)
+	}
+	return redisParams
 }
