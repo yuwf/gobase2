@@ -15,10 +15,10 @@ import (
 
 // ServiceInfo是和业务相关的客户端信息结构 透传给TcpService
 type TcpBackend[ServiceInfo any] struct {
-	sync.RWMutex                         // 注意只保护group的变化 不要保护group内的操作
+	sync.RWMutex                                   // 注意只保护group的变化 不要保护group内的操作
 	group        map[string]*TcpGroup[ServiceInfo] // 所有的服务器组 锁保护
 	event        TcpEvent[ServiceInfo]             // 事件处理
-	watcher      interface{}             // 服务器发现相关的对象 consul或者redis对象
+	watcher      interface{}                       // 服务器发现相关的对象 consul或者redis对象
 	// 请求处理完后回调 不使用锁，默认要求提前注册好
 	hook []TCPHook[ServiceInfo]
 }
@@ -57,7 +57,7 @@ func (tb *TcpBackend[ServiceInfo]) GetService(serviceName, serviceId string) *Tc
 	return nil
 }
 
-// 根据哈希环获取,哈希环行记录的都是连接成功的
+// 根据哈希环获取,哈希环行记录的都是连接成功且发现配置都存在的
 func (tb *TcpBackend[ServiceInfo]) GetServiceByHash(serviceName, hash string) *TcpService[ServiceInfo] {
 	group := tb.GetGroup(serviceName)
 	if group != nil {
