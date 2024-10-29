@@ -157,7 +157,7 @@ func BenchmarkListenService(b *testing.B) {
 	//log.Info().Strs("serviceNames", serviceNames).Msg("GetAllServicesInfo")
 	//regs, _ := defaultClient.SelectInstances("sname1", "gname", []string{"a"})
 	//log.Info().Interface("regs", regs).Msg("SelectInstances")
-	defaultClient.ListenService("sname1", "gname", []string{"a"}, func(infos []*RegistryInfo) {
+	defaultClient.ListenService("ds", "pc_ds", []string{""}, func(infos []*RegistryInfo) {
 		log.Info().Interface("infos", infos).Msg("Regs")
 	})
 	time.Sleep(time.Hour)

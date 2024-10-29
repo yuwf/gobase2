@@ -5,7 +5,6 @@ package goredis
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -145,9 +144,7 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 		return err
 	}
 	if len(sInfo.Tags) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
-		return err
+		return nil // 没有值要读取，直接返回
 	}
 
 	args := []interface{}{"hmget", key}
@@ -174,9 +171,7 @@ func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 	}
 	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
-		return err
+		return nil // 没有值写入，直接返回
 	}
 	args := []interface{}{"hmset", key}
 	args = append(args, fargs...)
@@ -245,9 +240,12 @@ func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Tim
 	}
 
 	// 回调
-	for _, f := range r.hook {
-		f(ctx, redisCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range r.hook {
+			f(ctx, redisCmd)
+		}
+	}()
 }
 
 func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err error, entry time.Time) error {
@@ -374,9 +372,12 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 	}
 
 	// 回调
-	for _, f := range r.hook {
-		f(ctx, redisCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range r.hook {
+			f(ctx, redisCmd)
+		}
+	}()
 
 	return err
 }

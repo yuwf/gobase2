@@ -73,6 +73,7 @@ func (*TcpEventHandler[ServiceInfo]) GoRedisFilter(confs []*goredis.RegistryInfo
 	return []*ServiceConfig{}
 }
 func (*TcpEventHandler[ServiceInfo]) OnConnected(ctx context.Context, ts *TcpService[ServiceInfo]) {
+	ts.OnLogin() // 直接标记登录成功
 }
 func (*TcpEventHandler[ServiceInfo]) OnDisConnect(ctx context.Context, ts *TcpService[ServiceInfo]) {
 }

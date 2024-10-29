@@ -87,9 +87,12 @@ func (r *Redis) doScriptCmd(ctx context.Context, script *RedisScript, redisCmd *
 	}
 
 	// 回调
-	for _, f := range r.hook {
-		f(ctx, redisCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range r.hook {
+			f(ctx, redisCmd)
+		}
+	}()
 }
 
 func (r *Redis) DoScriptInt(ctx context.Context, script *RedisScript, keysAndArgs ...interface{}) (int, error) {

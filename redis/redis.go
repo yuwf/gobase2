@@ -174,9 +174,12 @@ func (r *Redis) docmd(ctx context.Context, redisCmd *RedisCommond) {
 	}
 
 	// 回调
-	for _, f := range r.hook {
-		f(ctx, redisCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range r.hook {
+			f(ctx, redisCmd)
+		}
+	}()
 }
 
 func (r *Redis) DoCmdInt(ctx context.Context, cmd string, args ...interface{}) (int, error) {
@@ -439,9 +442,7 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 		return err
 	}
 	if len(sInfo.Tags) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
-		return err
+		return nil // 没有值要读取，直接返回
 	}
 
 	redisCmd.Args = append(redisCmd.Args, key)
@@ -471,9 +472,7 @@ func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 	}
 	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
-		return err
+		return nil // 没有值写入，直接返回
 	}
 
 	redisCmd.Args = append(redisCmd.Args, key)

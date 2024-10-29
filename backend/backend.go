@@ -12,14 +12,20 @@ import (
 // 服务配置
 type ServiceConfig struct {
 	// 要求字符串类型的字段小写且去掉前后空格
-	ServiceName string `json:"servicename,omitempty"` // 服务器类型名，用来分组【内部会转化成去空格的小写】
-	ServiceId   string `json:"serviceid,omitempty"`   // 服务器唯一ID【内部会转化成去空格的小写】
-	ServiceAddr string `json:"serviceaddr,omitempty"` // 服务器对外暴露的地址
-	ServicePort int    `json:"serviceport,omitempty"` // 服务器对外暴露的端口
-	RoutingTag  string `json:"routertag,omitempty"`   // 支持路由tag group内再次进行分组【内部会转化成去空格的小写】
+	ServiceName string            `json:"servicename,omitempty"` // 服务器类型名，用来分组【内部会转化成去空格的小写】
+	ServiceId   string            `json:"serviceid,omitempty"`   // 服务器唯一ID【内部会转化成去空格的小写】
+	ServiceAddr string            `json:"serviceaddr,omitempty"` // 服务器对外暴露的地址
+	ServicePort int               `json:"serviceport,omitempty"` // 服务器对外暴露的端口
+	Metadata    map[string]string `json:"metadata,omitempty"`    // 配置的元数据
+	RoutingTag  []string          `json:"routertag,omitempty"`   // 支持路由tag 可以将服务器分到多个组中【内部会转化成去空格的小写】
 }
 type ServiceIdConfMap = map[string]*ServiceConfig
 type ServiceNameConfMap = map[string]ServiceIdConfMap
+
+// ServiceInfo中可选择实现的函数
+type ServiceCreater interface {
+	ServiceCreate(conf *ServiceConfig)
+}
 
 // 创建TcpBackend，使用Consul做服务器发现
 func NewTcpBackendWithConsul[ServiceInfo any](consulAddr, tag string, event TcpEvent[ServiceInfo]) (*TcpBackend[ServiceInfo], error) {

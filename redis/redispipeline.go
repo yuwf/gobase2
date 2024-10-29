@@ -152,9 +152,7 @@ func (p *RedisPipeline) HMGetObj(ctx context.Context, key string, v interface{})
 		return err
 	}
 	if len(sInfo.Tags) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
-		return err
+		return nil // 没有值要读取，直接返回
 	}
 
 	redisCmd.BindValues(sInfo.Elemts) // 管道里这个不会返回错误
@@ -180,9 +178,7 @@ func (p *RedisPipeline) HMSetObj(ctx context.Context, key string, v interface{})
 	}
 	fargs := sInfo.TagElemtNoNilFmt()
 	if len(fargs) == 0 {
-		err := errors.New("structmem invalid")
-		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
-		return err
+		return nil // 没有值写入，直接返回
 	}
 
 	redisCmd.Args = append(redisCmd.Args, key)

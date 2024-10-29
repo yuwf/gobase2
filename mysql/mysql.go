@@ -132,9 +132,12 @@ func (m *MySQL) Get(ctx context.Context, dest interface{}, query string, args ..
 		}
 	}
 	// 回调
-	for _, f := range m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return mysqlCmd.Err
 }
 
@@ -169,9 +172,12 @@ func (m *MySQL) Select(ctx context.Context, dest interface{}, query string, args
 		}
 	}
 	// 回调
-	for _, f := range m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return mysqlCmd.Err
 }
 
@@ -206,9 +212,12 @@ func (m *MySQL) Exec(ctx context.Context, query string, args ...interface{}) (sq
 		}
 	}
 	// 回调
-	for _, f := range m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return resp, mysqlCmd.Err
 }
 
@@ -246,9 +255,12 @@ func (m *MySQL) Update(ctx context.Context, query string, args ...interface{}) (
 		return 0, mysqlCmd.Err
 	}
 	// 回调
-	for _, f := range m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return resp.RowsAffected()
 }
 
@@ -296,9 +308,12 @@ func (mt *MySQLTx) Exec(ctx context.Context, query string, args ...interface{}) 
 		}
 	}
 	// 回调
-	for _, f := range mt.m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range mt.m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return resp, mysqlCmd.Err
 }
 
@@ -330,9 +345,12 @@ func (mt *MySQLTx) Commit(ctx context.Context) error {
 		}
 	}
 	// 回调
-	for _, f := range mt.m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range mt.m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return mysqlCmd.Err
 }
 
@@ -364,8 +382,11 @@ func (mt *MySQLTx) Rollback(ctx context.Context) error {
 		}
 	}
 	// 回调
-	for _, f := range mt.m.hook {
-		f(ctx, mysqlCmd)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range mt.m.hook {
+			f(ctx, mysqlCmd)
+		}
+	}()
 	return mysqlCmd.Err
 }

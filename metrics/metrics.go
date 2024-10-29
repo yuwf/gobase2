@@ -56,14 +56,14 @@ func RegGinServer(gin *ginserver.GinServer) {
 // GNetServer统计
 func RegGNetServer[ClientId any, ClientInfo any](gnet *gnetserver.GNetServer[ClientId, ClientInfo]) {
 	if gnet != nil {
-		gnet.RegHook(&gNetHook[ClientInfo]{addr: gnet.Address, connCount: gnet})
+		gnet.RegHook(&gNetHook[ClientInfo]{addr: gnet.Address, server: gnet})
 	}
 }
 
 // TCPServer统计
 func RegTCPServer[ClientId any, ClientInfo any](ts *tcpserver.TCPServer[ClientId, ClientInfo]) {
 	if ts != nil {
-		ts.RegHook(&tcpServerHook[ClientInfo]{addr: ts.Address, connCount: ts})
+		ts.RegHook(&tcpServerHook[ClientInfo]{addr: ts.Address, server: ts})
 	}
 }
 

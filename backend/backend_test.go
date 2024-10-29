@@ -76,6 +76,7 @@ func (h *TcpHandler) ConsulFilter(confs []*consul.RegistryInfo) []*ServiceConfig
 				ServiceId:   serviceId,
 				ServiceAddr: conf.RegistryAddr,
 				ServicePort: conf.RegistryPort,
+				Metadata:    conf.RegistryMeta,
 			}
 			tcp = append(tcp, c)
 		}
@@ -110,6 +111,7 @@ func (h *TcpHandler) NacosFilter(confs []*nacos.RegistryInfo) []*ServiceConfig {
 				ServiceId:   serviceId,
 				ServiceAddr: conf.Ip,
 				ServicePort: conf.Port,
+				Metadata:    conf.Metadata,
 			}
 			tcp = append(tcp, c)
 		}
@@ -129,6 +131,7 @@ func (h *TcpHandler) RedisFilter(confs []*redis.RegistryInfo) []*ServiceConfig {
 				ServiceId:   conf.RegistryID,
 				ServiceAddr: conf.RegistryAddr,
 				ServicePort: conf.RegistryPort,
+				// Metadata:    conf.Metadata, redis没有Metadata
 			}
 			tcp = append(tcp, c)
 		}
@@ -148,6 +151,7 @@ func (h *TcpHandler) GoRedisFilter(confs []*goredis.RegistryInfo) []*ServiceConf
 				ServiceId:   conf.RegistryID,
 				ServiceAddr: conf.RegistryAddr,
 				ServicePort: conf.RegistryPort,
+				// Metadata:    conf.Metadata, redis没有Metadata
 			}
 			tcp = append(tcp, c)
 		}
@@ -157,6 +161,7 @@ func (h *TcpHandler) GoRedisFilter(confs []*goredis.RegistryInfo) []*ServiceConf
 
 func (h *TcpHandler) OnConnected(ctx context.Context, ts *TcpService[TcpServiceInfo]) {
 	// 连接成功 发送心跳
+	ts.OnLogin() // 直接标记登录成功
 }
 
 func (h *TcpHandler) OnDisConnect(ctx context.Context, ts *TcpService[TcpServiceInfo]) {

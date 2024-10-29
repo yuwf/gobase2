@@ -479,9 +479,12 @@ func (gs *GinServer) handleNext(ctx context.Context, c *gin.Context, blw *respon
 func (gs *GinServer) callhook(ctx context.Context, c *gin.Context, elapsed time.Duration) {
 	defer utils.HandlePanic()
 	// 回调
-	for _, f := range gs.hook {
-		f(ctx, c, elapsed)
-	}
+	func() {
+		defer utils.HandlePanic()
+		for _, f := range gs.hook {
+			f(ctx, c, elapsed)
+		}
+	}()
 }
 
 func (gs *GinServer) log(ctx context.Context, c *gin.Context, logLevel int, logHeadOut bool, elapsed time.Duration, blw *responseWriterWrapper, msg string) {

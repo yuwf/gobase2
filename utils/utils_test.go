@@ -1,11 +1,20 @@
 package utils
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
+
+func BenchmarkDelete(b *testing.B) {
+	t := []int{30}
+	t2 := Delete(t, 20)
+	fmt.Println(t, t2)
+}
 
 func BenchmarkRandStr(b *testing.B) {
 	fmt.Println(RandString(32))
@@ -28,12 +37,55 @@ func BenchmarkSequence(b *testing.B) {
 		n := i
 		seq.Submit(func() {
 			if n == 10 {
-				panic("no")
+				panic("no") // 不会输出10
 			}
+			time.Sleep(time.Second)
 			fmt.Println(n)
 		})
 	}
+	time.Sleep(time.Minute)
+}
+
+func GetGID() uint64 {
+	b := make([]byte, 64)
+	b = b[:runtime.Stack(b, false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	b = b[:bytes.IndexByte(b, ' ')]
+	n, _ := strconv.ParseUint(string(b), 10, 64)
+	return n
+}
+
+func BenchmarkGroupSequence1(b *testing.B) {
+	var seq GroupSequence
+	for i := 0; i < 20; i++ {
+		n := i
+		seq.Submit(RandString(10), func() {
+			fmt.Println(GetGID(), n)
+		})
+	}
 	time.Sleep(time.Second * 10)
+}
+
+func BenchmarkGroupSequence2(b *testing.B) {
+	var seq GroupSequence
+	for i := 0; i < 20; i++ {
+		n := i
+		seq.Submit("my", func() {
+			if n == 10 {
+				panic("no") // 不会输出10
+			}
+			time.Sleep(time.Second)
+			fmt.Println("my", n)
+		})
+	}
+	for i := 0; i < 20; i++ {
+		n := i
+		seq.Submit("my2", func() {
+			time.Sleep(time.Second*2)
+			fmt.Println("    my2", n)
+		})
+	}
+	time.Sleep(time.Minute)
 }
 
 func BenchmarkProcess(b *testing.B) {
@@ -126,4 +178,11 @@ func BenchmarkInterfaceToValue(b *testing.B) {
 	err = InterfaceToValue(str, reflect.ValueOf(&ss))
 	fmt.Println(err, ss)
 
+}
+
+func BenchmarkNTP(b *testing.B) {
+	for i := 0; i < 1000; i++ {
+		NtpTime()
+		fmt.Println(ntpServers[0].Addr, ntpServers[0].avgTime)
+	}
 }

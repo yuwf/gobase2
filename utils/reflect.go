@@ -199,6 +199,9 @@ func ValueFmt(v reflect.Value) interface{} {
 	case reflect.Struct:
 		t, ok := v.Interface().(time.Time) // Time类型 存时间戳,毫秒级别
 		if ok {
+			if t.IsZero() {
+				return nil
+			}
 			return t.UnixMilli()
 		}
 		return valueFmtJson(v)
@@ -609,6 +612,9 @@ func stringToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 						return true, nil
 					} else if l == 19 {
 						*t = time.Unix(r/1e9, r%1e9)
+						return true, nil
+					} else {
+						// 不转化
 						return true, nil
 					}
 				} else {

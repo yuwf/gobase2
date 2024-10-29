@@ -57,7 +57,7 @@ func (c *ParamConfig) Create() {
 	c.LogMergeByPath = map[string]bool{}
 	c.TimeOutCheck = 8 // 8秒超时报警
 	c.Cors = defaultCorsOptions
-	c.BodyLogLimit = 1024
+	c.BodyLogLimit = 256
 }
 
 func (c *ParamConfig) Normalize() {

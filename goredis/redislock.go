@@ -50,12 +50,12 @@ func (r *Redis) TryLock(ctx context.Context, key string, timeout time.Duration) 
 	cmd := r.Do(ctx, "SET", key, uuid, "PX", timeout.Milliseconds(), "NX")
 
 	if cmd.Err() != nil {
-		return nil, cmd.Err()
+		return nil, errors.New("lock err(" + cmd.Err().Error() + ")")
 	}
 
 	reply, _ := cmd.Text()
 	if reply != "OK" {
-		err := errors.New("not OK")
+		err := errors.New("lock err(not OK)")
 		if logOut {
 			// Debug就行 毕竟是try
 			utils.LogCtx(log.Debug(), ctx).Err(err).Int32("elapsed", int32(time.Since(entry)/time.Millisecond)).
@@ -77,7 +77,8 @@ func (r *Redis) TryLock(ctx context.Context, key string, timeout time.Duration) 
 	}
 }
 
-// 只尝试一次加锁，失败会一直等待其他解锁，其他解锁后也不会再加锁了（返回成功，但返回的func为空），成功了直接返回
+// 只尝试一次加锁，失败会一直等待其他解锁，异常或者超时后，返回错误
+// 其他解锁后也不会再加锁了（返回成功，但返回的func为空），成功了直接返回
 func (r *Redis) TryLockWait(ctx context.Context, key string, timeout time.Duration) (func(), error) {
 	caller, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
 	if !ok {
@@ -140,7 +141,7 @@ func (r *Redis) TryLockWait(ctx context.Context, key string, timeout time.Durati
 		}
 		time.Sleep(time.Millisecond * 10)
 		if time.Since(entry) > timeout {
-			err = errors.New("time out")
+			err = errors.New("lock time out")
 			break
 		}
 	}
@@ -167,7 +168,7 @@ func (r *Redis) TryLockWait(ctx context.Context, key string, timeout time.Durati
 	}
 }
 
-// 只尝试多次加锁，超时后，返回失败
+// 只尝试多次加锁，异常或者超时后，返回错误
 func (r *Redis) Lock(ctx context.Context, key string, timeout time.Duration) (func(), error) {
 	caller, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
 	if !ok {
@@ -219,7 +220,7 @@ func (r *Redis) Lock(ctx context.Context, key string, timeout time.Duration) (fu
 		}
 		time.Sleep(time.Millisecond * 10)
 		if time.Since(entry) > timeout {
-			err = errors.New("time out")
+			err = errors.New("lock time out")
 			break
 		}
 	}

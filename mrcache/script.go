@@ -10,6 +10,24 @@ import "gobase/goredis"
 // hmset的返回值有点坑，在lua中返回的table n['ok']='OK'
 // 空值nil不要写入到redis中，给reids写nil值时，redis会写入空字符串，对一些自增类型的值，后面自增会有问题
 
+// 自增 总key
+// 参数：第一个自增的field，正常情况用tablename，第二个参数表示拆表的个数(tablecount，0:不拆表)，第三个表示第几个表
+// 返回值：err=nil时 自增值
+var incrScript = goredis.NewScript(`
+	local tableCount = tonumber(ARGV[2])
+	local incrIndex = tonumber(ARGV[3])
+	if tableCount == 0 then
+		return redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
+	end
+	local rst = redis.call('HINCRBY', KEYS[1], ARGV[1], tableCount)
+	local mod = rst % tableCount
+	if mod ~= incrIndex then
+		rst = rst - mod + incrIndex
+		redis.call('HSET', KEYS[1], ARGV[1], rst)
+	end
+	return rst
+`)
+
 // row /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // 读取数据
 // key：生成的key key不存在返回值为空
@@ -166,13 +184,27 @@ var rowsAddScript = goredis.NewScript(`
 	return 'OK'
 `)
 
-// rows 删除数据
-// key：第一个key为索引key
-// 参数：第一个是有效期 其他：field field ..
+// rows 删除全部数据
+// key：第一个key为索引key，第二个为数据key,
+// 参数：dataValue
 // 返回值：err=nil时 OK
 var rowsDelScript = goredis.NewScript(`
+	-- 删除索引key中的数据key
+	local rst = redis.call('HDEL', KEYS[1], ARGV[1])
+	if rst == 0 then
+		return 'OK'
+	end
+	-- 删除数据key
+	redis.call('DEL', KEYS[2])
+	return 'OK'
+`)
+
+// rows 删除全部数据
+// key：第一个key为索引key
+// 返回值：err=nil时 OK
+var rowsDelAllScript = goredis.NewScript(`
 	local datakeys = redis.call('HVALS', KEYS[1])
-	-- 删除主key
+	-- 删除索引key
 	local rst = redis.call('DEL', KEYS[1])
 	if rst == 0 then
 		return 'OK'

@@ -30,12 +30,13 @@ var cacheRows *CacheRows[Test]
 
 func init() {
 	var mysqlCfg = &mysql.Config{
-		Source: "root:1235@tcp(localhost:3306)/test?charset=utf8&parseTime=true&loc=Local", // 这里必须添加上&parseTime=true&loc=Local 否则time.Time解析不了
+		Source: "root:1235@tcp(localhost:3306)/mysql?charset=utf8&parseTime=true&loc=Local", // 这里必须添加上&parseTime=true&loc=Local 否则time.Time解析不了
 	}
 
 	var redisCfg = &goredis.Config{
 		Addrs:  []string{"127.0.0.1:6379"},
 		Passwd: "1235",
+		DB:     10,
 	}
 
 	ctx := context.WithValue(context.TODO(), utils.CtxKey_nolog, 1)
@@ -50,7 +51,15 @@ func init() {
 		return
 	}
 
-	_, err = mysql.DefaultMySQL().Exec(ctx, "USE test")
+	// use 命令貌似切不了数据库，重新连数据库
+	//_, err = mysql.DefaultMySQL().Exec(ctx, "USE test")
+	//if err != nil {
+	//	return
+	//}
+	mysqlCfg = &mysql.Config{
+		Source: "root:1235@tcp(localhost:3306)/test?charset=utf8&parseTime=true&loc=Local", // 这里必须添加上&parseTime=true&loc=Local 否则time.Time解析不了
+	}
+	_, err = mysql.InitDefaultMySQL(mysqlCfg)
 	if err != nil {
 		return
 	}
@@ -79,17 +88,17 @@ func init() {
 		return
 	}
 
-	sql = `INSERT INTO test (UID,Type,Name,Age,Mark) VALUES
-	(123, 0,"Name123_0",  0, "Mark123_0"),
-	(123, 1,"Name123_1", 10, "Mark123_1"),
-	(123, 2,"Name123_2", 20, "Mark123_2"),
-	(123, 3,"Name123_3", 30, "Mark123_3"),
-	(123, 4,"Name123_4", 40, "Mark123_4"),
-	(123, 5,"Name123_5", 50, "Mark123_5"),
-	(123, 6,"Name123_6", 60, "Mark123_6"),
-	(123, 7,"Name123_7", 70, "Mark123_7"),
-	(123, 8,"Name123_8", 80, "Mark123_8"),
-	(123, 9,"Name123_9", 90, "Mark123_9");
+	sql = `INSERT INTO test (Id,UID,Type,Name,Age,Mark) VALUES
+	(1, 123, 0,"Name123_0",  0, "Mark123_0"),
+	(2, 123, 1,"Name123_1", 10, "Mark123_1"),
+	(3, 123, 2,"Name123_2", 20, "Mark123_2"),
+	(4, 123, 3,"Name123_3", 30, "Mark123_3"),
+	(5, 123, 4,"Name123_4", 40, "Mark123_4"),
+	(6, 123, 5,"Name123_5", 50, "Mark123_5"),
+	(7, 123, 6,"Name123_6", 60, "Mark123_6"),
+	(8, 123, 7,"Name123_7", 70, "Mark123_7"),
+	(9, 123, 8,"Name123_8", 80, "Mark123_8"),
+	(10,123, 9,"Name123_9", 90, "Mark123_9");
 	`
 
 	_, err = mysql.DefaultMySQL().Exec(ctx, sql)
@@ -102,26 +111,26 @@ func init() {
 		return
 	}
 
-	cacheRow = NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	cacheRow = NewCacheRow[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0)
 	err = cacheRow.ConfigHashTag("UID")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-	err = cacheRow.ConfigIncrement(goredis.DefaultRedis(), "Id", "test")
+	err = cacheRow.ConfigIncrement(goredis.DefaultRedis(), "Id")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
 	}
 
 	// 多列
-	cacheRows = NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test")
+	cacheRows = NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0)
 	err = cacheRows.ConfigHashTag("UID")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
 	}
-	err = cacheRows.ConfigIncrement(goredis.DefaultRedis(), "Id", "test")
+	err = cacheRows.ConfigIncrement(goredis.DefaultRedis(), "Id")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigIncrement Err")
 		return
@@ -152,6 +161,68 @@ func BenchmarkRowGet(b *testing.B) {
 	// 再次读取
 	user, err = cacheRow.Get(context.TODO(), NewConds().Eq("UID", 123).Eq("Type", 1))
 	log.Info().Err(err).Interface("user", user).Msg("Get")
+}
+
+func BenchmarkRowAdd(b *testing.B) {
+	if cacheRow == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+
+	// 先删除
+	cacheRow.Del(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1))
+	cacheRow.Del(context.TODO(), NewConds().Eq("UID", 127).Eq("Type", 1))
+
+	type AddTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+	}
+	s := &AddTest{
+		Name: "Hello126",
+		Age:  1000,
+	}
+	// 添加一个不存在的
+	user, incrValue, err := cacheRow.Add(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1), s)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Add")
+
+	// 添加一个不存在的
+	sm := map[string]interface{}{
+		"Name": "Hello127",
+		"Age":  10000,
+	}
+	user, incrValue, err = cacheRow.AddM(context.TODO(), NewConds().Eq("UID", 127).Eq("Type", 1), sm)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("AddM")
+}
+
+func BenchmarkRowAdd2(b *testing.B) {
+	if cacheRow == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+
+	// 先删除
+	cacheRow.Del(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1))
+	cacheRow.Del(context.TODO(), NewConds().Eq("UID", 127).Eq("Type", 1))
+
+	type AddTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+	}
+	s := &AddTest{
+		Name: "Hello126",
+		Age:  1000,
+	}
+	// 添加一个不存在的
+	incrValue, err := cacheRow.Add2(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1), s)
+	log.Info().Err(err).Interface("incrValue", incrValue).Msg("Add2")
+
+	// 添加一个不存在的
+	sm := map[string]interface{}{
+		"Name": "Hello127",
+		"Age":  10000,
+	}
+	incrValue, err = cacheRow.AddM2(context.TODO(), NewConds().Eq("UID", 127).Eq("Type", 1), sm)
+	log.Info().Err(err).Interface("incrValue", incrValue).Msg("AddM2")
 }
 
 func BenchmarkRowSet(b *testing.B) {
@@ -232,6 +303,10 @@ func BenchmarkRowSet2(b *testing.B) {
 	// 设置一个不存在的
 	incrValue, err := cacheRow.Set2(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1), s, true)
 	log.Info().Err(err).Interface("incrValue", incrValue).Msg("Set2")
+
+	// 修改已有数据
+	s.Name = "Hello Name"
+	incrValue, err = cacheRow.Set2(context.TODO(), NewConds().Eq("UID", 126).Eq("Type", 1), s, true)
 
 	s = &SetTest{
 		Name: "Hello2",
@@ -390,6 +465,39 @@ func BenchmarkRowsGet(b *testing.B) {
 	log.Info().Err(err).Interface("user", user).Msg("Get")
 }
 
+func BenchmarkRowsAdd(b *testing.B) {
+	if cacheRow == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+
+	// 先删除缓存
+	cacheRows.DelCache(context.TODO(), NewConds().Eq("UID", 126))
+
+	type AddTest struct {
+		Name string `db:"Name"json:"Name,omitempty"` //名字  不可为空
+		Age  int    `db:"Age"json:"Age,omitempty"`   //年龄
+		Type int    `db:"Type"json:"Type,omitempty"` //数据字段
+	}
+	s := &AddTest{
+		Name: "Hello12",
+		Age:  1000,
+		Type: 12,
+	}
+	// 添加一个不存在的
+	user, incrValue, err := cacheRows.Add(context.TODO(), NewConds().Eq("UID", 126), s)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("Add")
+
+	// 添加一个不存在的
+	sm := map[string]interface{}{
+		"Name": "Hello13",
+		"Age":  10000,
+		"Type": 13,
+	}
+	user, incrValue, err = cacheRows.AddM(context.TODO(), NewConds().Eq("UID", 126), sm)
+	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("AddM")
+}
+
 func BenchmarkRowsExist(b *testing.B) {
 	if cacheRows == nil {
 		log.Error().Msg("init not success")
@@ -408,6 +516,27 @@ func BenchmarkRowsExist(b *testing.B) {
 
 	// 不存在的
 	exist, err = cacheRows.Exist(context.TODO(), NewConds().Eq("UID", 123), 100)
+	log.Info().Err(err).Interface("exist", exist).Msg("Exist")
+}
+
+func BenchmarkRowsDel(b *testing.B) {
+	if cacheRows == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+
+	// 先删除缓存
+	cacheRows.DelCache(context.TODO(), NewConds().Eq("UID", 123))
+
+	exist, err := cacheRows.Exist(context.TODO(), NewConds().Eq("UID", 123), 8)
+	log.Info().Err(err).Interface("exist", exist).Msg("Exist")
+
+	// 删除
+	err = cacheRows.Del(context.TODO(), NewConds().Eq("UID", 123), 8)
+	log.Info().Err(err).Msg("Exist")
+
+	// 不存在
+	exist, err = cacheRows.Exist(context.TODO(), NewConds().Eq("UID", 123), 8)
 	log.Info().Err(err).Interface("exist", exist).Msg("Exist")
 }
 
@@ -593,8 +722,10 @@ func BenchmarkRowsModifyM(b *testing.B) {
 		"Age":  10000,
 		"Type": 12,
 	}
+	cacheRows.toMysqlAsync = true // 异步执行
 	// 设置一个存在的
 	user, incrValue, err = cacheRows.ModifyM(context.TODO(), NewConds().Eq("UID", 123), s, true)
+	time.Sleep(time.Minute)
 	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("ModifyM")
 }
 
@@ -661,7 +792,7 @@ func BenchmarkRowsModifyM2(b *testing.B) {
 		"Age":  10000,
 		"Type": 12,
 	}
-	// 设置一个存在的
+	// 设置一个不存在的
 	user, incrValue, err = cacheRows.ModifyM2(context.TODO(), NewConds().Eq("UID", 123), s, true)
 	log.Info().Err(err).Interface("user", user).Interface("incrValue", incrValue).Msg("ModifyM2")
 }

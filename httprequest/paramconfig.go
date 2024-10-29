@@ -51,7 +51,7 @@ func (c *ParamConfig) Create() {
 	c.LogLevelHeadByHost = map[string]int{}
 	c.LogLevelHeadByPath = map[string]int{}
 	c.TimeOutCheck = 8 // 8秒超时报警
-	c.BodyLogLimit = 1024
+	c.BodyLogLimit = 256
 }
 
 func (c *ParamConfig) Normalize() {
