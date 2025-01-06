@@ -8,17 +8,17 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode"
 	"unsafe"
 
 	"gobase/utils"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 const CtxKey_nonilerr = utils.CtxKey("nonilerr") // 命令移除空错误 值：不受限制 一般写1
-const CtxKey_nolog = utils.CtxKey_nolog          // 不打印日志，错误日志还会打印 值：不受限制 一般写1
-
 const CtxKey_rediscmd = utils.CtxKey("rediscmd") // 值：RedisCommand对象 一般情况内部使用
 
 const CtxKey_cmddesc = utils.CtxKey("cmddesc")       // 值：字符串 命令描述 一般情况内部使用
@@ -115,9 +115,7 @@ func (r *Redis) RegHook(f func(ctx context.Context, cmd *RedisCommond)) {
 
 // 支持返回值绑定的函数
 func (r *Redis) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -131,9 +129,7 @@ func (r *Redis) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
 // 结构成员其他类型 : 通过Json转化
 // 传入的参数为结构的地址
 func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -148,7 +144,7 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 	}
 
 	args := []interface{}{"hmget", key}
-	args = append(args, sInfo.Tags...)
+	args = append(args, sInfo.TagsSlice()...)
 	rst := r.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
 	if rst.Err() != nil {
 		return rst.Err()
@@ -160,16 +156,13 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 
 // 参数v 参考Redis.HMGetObj的说明
 func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
-	_, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
-	if !ok {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
 		return err
 	}
-	fargs := sInfo.TagElemtNoNilFmt()
+	fargs := TagElemtNoNilFmt(sInfo)
 	if len(fargs) == 0 {
 		return nil // 没有值写入，直接返回
 	}
@@ -179,10 +172,17 @@ func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
 	return rst.Err()
 }
 
-func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Time) {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(5)) // 有些命令不准确
+func getCmd(query, def string) string {
+	for i, r := range query {
+		if unicode.IsSpace(r) { // 检查是否为空格或其他空白字符
+			return strings.ToUpper(query[:i])
+		}
 	}
+	return def
+}
+
+func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Time) {
+	ctx = utils.CtxCaller(ctx, 5) // // 有些命令不准确
 	// 构造或查找RedisCommond
 	var redisCmd *RedisCommond
 	rediscmd, ok := ctx.Value(CtxKey_rediscmd).(*RedisCommond)
@@ -202,10 +202,7 @@ func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Tim
 		redisCmd.CmdDesc = cmddesc
 	}
 
-	logOut := true
-	if ctx.Value(CtxKey_nolog) != nil {
-		logOut = false
-	}
+	logOut := !utils.CtxHasNolog(ctx)
 	// 先把命令内容格式化，防止修改Nil
 	var cmdStr string
 	var replyStr string
@@ -231,12 +228,12 @@ func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Tim
 	} else if cmd.Err() != nil && cmd.Err() != redis.Nil {
 		utils.LogCtx(log.Error(), ctx).Err(cmd.Err()).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 			Str("cmd", cmdStr).
-			Msg("Redis cmd fail")
-	} else if logOut {
+			Msg("Redis " + getCmd(cmdStr, "cmd") + " Fail")
+	} else if logOut && zerolog.DebugLevel >= log.Logger.GetLevel() {
 		utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 			Str("cmd", cmdStr).
 			Str("reply", replyStr).
-			Msg("Redis cmd success")
+			Msg("Redis " + getCmd(cmdStr, "cmd") + " Success")
 	}
 
 	// 回调
@@ -249,9 +246,7 @@ func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Tim
 }
 
 func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err error, entry time.Time) error {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(4))
-	}
+	ctx = utils.CtxCaller(ctx, 4)
 	// 构造或查找RedisCommond
 	var redisCmd *RedisCommond
 	rediscmd, ok := ctx.Value(CtxKey_rediscmd).(*RedisCommond)
@@ -285,6 +280,7 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 			if rcmd == nil {
 				continue
 			}
+			rcmd.Cmd = cmd
 			if rcmd.nscallback != nil && redis.HasErrorPrefix(cmd.Err(), "NOSCRIPT") {
 				r := rcmd.nscallback()
 				c.SetVal(r.Val()) // 修改命令结果
@@ -295,11 +291,12 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 				continue
 			}
 			if rcmd.callback != nil {
-				rcmd.Cmd = cmd
 				err := rcmd.callback(c.Val())
 				if err != nil {
 					c.SetErr(err)
-					utils.LogCtx(log.Error(), ctx).Err(err).Str("cmd", rcmd.CmdString()).Msg("RedisCommond Bind Error")
+					if err != redis.Nil { // 有些绑定函数也会返回空
+						utils.LogCtx(log.Error(), ctx).Err(err).Str("cmd", rcmd.CmdString()).Msg("RedisCommond Bind Error")
+					}
 				}
 			}
 		}
@@ -314,10 +311,7 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 		}
 	}
 
-	logOut := true
-	if ctx.Value(CtxKey_nolog) != nil {
-		logOut = false
-	}
+	logOut := !utils.CtxHasNolog(ctx)
 	// 先把命令内容格式化，防止修改Nil
 	var cmdStr string
 	var replyStr string
@@ -363,12 +357,12 @@ func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err er
 		utils.LogCtx(log.Error(), ctx).Err(err).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 			Str("cmd", cmdStr).
 			Str("reply", replyStr).
-			Msg("RedisPipeline cmd fail")
-	} else if logOut {
+			Msg("RedisPipeline Fail")
+	} else if logOut && zerolog.DebugLevel >= log.Logger.GetLevel() {
 		utils.LogCtx(log.Debug(), ctx).Int32("elapsed", int32(redisCmd.Elapsed/time.Millisecond)).
 			Str("cmd", cmdStr).
 			Str("reply", replyStr).
-			Msg("RedisPipeline cmd success")
+			Msg("RedisPipeline Success")
 	}
 
 	// 回调

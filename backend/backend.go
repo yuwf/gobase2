@@ -6,7 +6,6 @@ import (
 	"gobase/consul"
 	"gobase/goredis"
 	"gobase/nacos"
-	"gobase/redis"
 )
 
 // 服务配置
@@ -80,28 +79,6 @@ func NewTcpBackendWithNacos2[ServiceInfo any](nacosCli *nacos.Client, serviceNam
 	return tb, nil
 }
 
-// 创建TcpBackend，使用Redis做服务器发现
-// key 表示服务器发现的key
-// serverName 表示监听哪些服务器 为空表示监听全部的服务器
-func NewTcpBackendWithRedis[ServiceInfo any](cfg *redis.Config, key string, serverNames []string, event TcpEvent[ServiceInfo]) (*TcpBackend[ServiceInfo], error) {
-	watcher, err := redis.NewRedis(cfg)
-	if err != nil {
-		return nil, err
-	}
-	tb := &TcpBackend[ServiceInfo]{
-		group:   map[string]*TcpGroup[ServiceInfo]{},
-		event:   event,
-		watcher: watcher,
-	}
-	// 服务发现部分
-	watcher.WatchServices(key, serverNames, func(infos []*redis.RegistryInfo) {
-		if tb.event != nil {
-			confs := tb.event.RedisFilter(infos)
-			tb.updateServices(confs)
-		}
-	})
-	return tb, nil
-}
 func NewTcpBackendWithGoRedis[ServiceInfo any](cfg *goredis.Config, key string, serverNames []string, event TcpEvent[ServiceInfo]) (*TcpBackend[ServiceInfo], error) {
 	watcher, err := goredis.NewRedis(cfg)
 	if err != nil {
@@ -143,28 +120,6 @@ func NewHttpBackendWithConsul[ServiceInfo any](consulAddr, tag string, event Htt
 	return hb, nil
 }
 
-// 创建HttpBackend，使用Redis做服务器发现
-// key 表示服务器发现的key
-// serverName 表示监听哪些服务器 为空表示监听全部的服务器
-func NewHttpBackendWithRedis[ServiceInfo any](cfg *redis.Config, key string, serverNames []string, event HttpEvent[ServiceInfo]) (*HttpBackend[ServiceInfo], error) {
-	watcher, err := redis.NewRedis(cfg)
-	if err != nil {
-		return nil, err
-	}
-	hb := &HttpBackend[ServiceInfo]{
-		group:   map[string]*HttpGroup[ServiceInfo]{},
-		event:   event,
-		watcher: watcher,
-	}
-	// 服务发现部分
-	watcher.WatchServices(key, serverNames, func(infos []*redis.RegistryInfo) {
-		if hb.event != nil {
-			confs := hb.event.RedisFilter(infos)
-			hb.updateServices(confs)
-		}
-	})
-	return hb, nil
-}
 func NewHttpBackendWithGoRedis[ServiceInfo any](cfg *goredis.Config, key string, serverNames []string, event HttpEvent[ServiceInfo]) (*HttpBackend[ServiceInfo], error) {
 	watcher, err := goredis.NewRedis(cfg)
 	if err != nil {

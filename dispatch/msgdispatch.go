@@ -430,34 +430,39 @@ func (r *MsgDispatch[Mr, Cr]) WaitAllMsgDone(timeout time.Duration) {
 }
 
 // 消息分发
-func (r *MsgDispatch[Mr, Cr]) Dispatch(ctx context.Context, m Mr, c *Cr) bool {
+func (r *MsgDispatch[Mr, Cr]) Dispatch(ctx context.Context, m Mr, c *Cr) (bool, error) {
 	msgid := m.MsgID()
 	value1, ok1 := r.handlers.Load(msgid)
 	if ok1 {
 		handler, _ := value1.(*msgHandler)
 		msg, err := m.BodyUnMarshal(handler.msgType)
-		if err != nil {
-			utils.LogCtx(log.Error(), ctx).Err(err).Str("MsgID", msgid).Str("MsgType", handler.msgType.String()).Msg("MsgDispatch Dispatch MsgMarshal error")
-			return false
-		}
-		// 熔断
-		if name, ok := ParamConf.Get().IsHystrixMsg(msgid); ok {
-			hystrix.DoC(ctx, name, func(ctx context.Context) error {
+		if err == nil {
+			// 熔断
+			if name, ok := ParamConf.Get().IsHystrixMsg(msgid); ok {
+				err = hystrix.DoC(ctx, name, func(ctx context.Context) error {
+					r.handle(ctx, handler, m, msgid, msg, c)
+					return nil
+				}, func(ctx context.Context, err error) error {
+					// 出现了熔断
+					// 熔断也会调用回调
+					r.callhook(ctx, msgid, 0)
+					return err
+				})
+			} else {
 				r.handle(ctx, handler, m, msgid, msg, c)
-				return nil
-			}, func(ctx context.Context, err error) error {
-				// 出现了熔断
-				utils.LogCtx(log.Error(), ctx).Err(err).Str("MsgID", msgid).Str("MsgType", handler.msgType.String()).Msg("MsgDispatch Hystrix")
-				// 熔断也会调用回调
-				r.callhook(ctx, msgid, 0)
-				return err
-			})
-		} else {
-			r.handle(ctx, handler, m, msgid, msg, c)
+			}
 		}
-		return true
+		if err != nil {
+			cer, _ := any(c).(utils.ConnTermianl)
+			l := utils.LogCtx(log.Error(), ctx).Err(err)
+			if cer != nil {
+				l.Str("Name", cer.ConnName())
+			}
+			l.Interface("Msg", m).Str("MsgType", handler.msgType.String()).Msg("MsgDispatch error")
+		}
+		return true, err
 	}
-	return false
+	return false, nil
 }
 
 func (r *MsgDispatch[Mr, Cr]) handle(ctx context.Context, handler *msgHandler, m Mr, msgid string, msg interface{}, c *Cr) {

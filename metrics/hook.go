@@ -16,7 +16,6 @@ import (
 	"gobase/goredis"
 	"gobase/httprequest"
 	"gobase/mysql"
-	"gobase/redis"
 	"gobase/tcpserver"
 	"gobase/utils"
 
@@ -156,41 +155,6 @@ func redisInit() {
 		redisMsgCount = promauto.NewCounterVec(prometheus.CounterOpts{Name: MetricsNamePrefix + "redis_msg_count"}, []string{"msgid"})
 		redisMsgTime = promauto.NewCounterVec(prometheus.CounterOpts{Name: MetricsNamePrefix + "redis_msg_time"}, []string{"msgid"})
 	})
-}
-
-func redisHook(ctx context.Context, cmd *redis.RedisCommond) {
-	redisInit()
-	// 找到key
-	var key string
-	if len(cmd.Args) >= 1 {
-		k := fmt.Sprintf("%v", cmd.Args[0])
-		for _, exp := range redisKeyRegexp {
-			k, err := exp.Replace(k, "*", 0, -1)
-			if err == nil && (len(key) == 0 || len(k) < len(key)) {
-				key = k
-			}
-		}
-	}
-
-	callerName := ""
-	caller, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
-	if ok {
-		callerName = caller.Name()
-	}
-
-	//redisCnt.WithLabelValues(strings.ToUpper(cmd.Cmd), key, callerName).Inc()
-	if cmd.Err != nil {
-		redisErrorCount.WithLabelValues(strings.ToUpper(cmd.Cmd), key, callerName).Inc()
-	}
-	redisLatency.WithLabelValues(strings.ToUpper(cmd.Cmd), key, callerName).Observe(float64(cmd.Elapsed) / float64(time.Microsecond))
-	if ctx != nil {
-		if msgId := ctx.Value(utils.CtxKey_msgId); msgId != nil {
-			if s, ok := msgId.(string); ok && len(s) > 0 {
-				redisMsgCount.WithLabelValues(s).Inc()
-				redisMsgTime.WithLabelValues(s).Add(float64(cmd.Elapsed) / float64(time.Microsecond))
-			}
-		}
-	}
 }
 
 func goredisHook(ctx context.Context, cmd *goredis.RedisCommond) {

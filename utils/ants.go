@@ -89,7 +89,9 @@ type Sequence struct {
 	mutex sync.Mutex
 	tasks list.List
 	run   bool
-	group *GroupSequence // 分组任务队列使用
+	// 正在执行的的分组任务
+	group   *GroupSequence
+	groupId string // 当前执行的groupId
 }
 
 func (s *Sequence) Submit(task func()) {
@@ -148,10 +150,12 @@ func (s *Sequence) handle() {
 	//取出一个任务
 	s.mutex.Lock() // 加锁
 	if s.tasks.Len() == 0 {
+		// 这里的逻辑理论只有触发Clear函数才会走到
 		s.run = false
 		if s.group != nil {
-			s.group.seqs.Delete(s) // 先删除
-			s.group = nil          // 置空
+			s.group.seqs.Delete(s.groupId) // 先删除
+			s.group = nil                  // 置空
+			s.groupId = ""
 			sequenceGroupPool.Put(s)
 		}
 		s.mutex.Unlock() // 解锁
@@ -169,8 +173,9 @@ func (s *Sequence) handle() {
 		} else {
 			s.run = false
 			if s.group != nil {
-				s.group.seqs.Delete(s) // 先删除
-				s.group = nil          // 置空
+				s.group.seqs.Delete(s.groupId) // 先删除
+				s.group = nil                  // 置空
+				s.groupId = ""
 				sequenceGroupPool.Put(s)
 			}
 		}
@@ -203,9 +208,11 @@ func (g *GroupSequence) Submit(groupId string, task func()) {
 	for {
 		seq := sequenceGroupPool.Get().(*Sequence)
 		seq.group = g
+		seq.groupId = groupId
 		gseq, ok := g.seqs.LoadOrStore(groupId, seq)
 		if ok {
 			seq.group = nil
+			seq.groupId = ""
 			sequenceGroupPool.Put(seq) // 有别的协程设置了，此处回收
 			seq = gseq.(*Sequence)
 		}

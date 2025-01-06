@@ -9,7 +9,6 @@ import (
 	"gobase/consul"
 	"gobase/goredis"
 	"gobase/nacos"
-	"gobase/redis"
 	"gobase/utils"
 )
 
@@ -19,9 +18,6 @@ type TcpEvent[ServiceInfo any] interface {
 
 	// consul服务器配置过滤器，返回符合条件的服务器
 	NacosFilter(confs []*nacos.RegistryInfo) []*ServiceConfig
-
-	// redis服务器配置过滤器，返回符合条件的服务器
-	RedisFilter(confs []*redis.RegistryInfo) []*ServiceConfig
 
 	// goredis服务器配置过滤器，返回符合条件的服务器
 	GoRedisFilter(confs []*goredis.RegistryInfo) []*ServiceConfig
@@ -64,9 +60,6 @@ func (*TcpEventHandler[ServiceInfo]) ConsulFilter(confs []*consul.RegistryInfo) 
 	return []*ServiceConfig{}
 }
 func (*TcpEventHandler[ServiceInfo]) NacosFilter(confs []*nacos.RegistryInfo) []*ServiceConfig {
-	return []*ServiceConfig{}
-}
-func (*TcpEventHandler[ServiceInfo]) RedisFilter(confs []*redis.RegistryInfo) []*ServiceConfig {
 	return []*ServiceConfig{}
 }
 func (*TcpEventHandler[ServiceInfo]) GoRedisFilter(confs []*goredis.RegistryInfo) []*ServiceConfig {

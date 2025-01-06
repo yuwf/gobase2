@@ -3,7 +3,6 @@ package alert
 // https://github.com/yuwf/gobase2
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"gobase/httprequest"
+	"gobase/utils"
 
 	"github.com/rs/zerolog/log"
 )
@@ -67,7 +67,7 @@ func SendFeiShuAlert(format string, a ...interface{}) {
 			Code int    `json:"code"`
 			Msg  string `json:"msg"`
 		}
-		ctx := context.WithValue(context.TODO(), httprequest.CtxKey_nolog, 1)
+		ctx := utils.CtxCaller(nil, 1)
 		httprequest.JsonRequest[response](ctx, "POST", feishuConf.alertAddr, body, nil)
 	}()
 }
@@ -89,7 +89,7 @@ func SendFeiShuAlert2(format string, a ...interface{}) {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 	}
-	ctx := context.WithValue(context.TODO(), httprequest.CtxKey_nolog, 1)
+	ctx := utils.CtxCaller(nil, 1)
 	httprequest.JsonRequest[response](ctx, "POST", addr, body, nil)
 }
 

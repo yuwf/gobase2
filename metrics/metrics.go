@@ -10,7 +10,6 @@ import (
 	"gobase/goredis"
 	"gobase/httprequest"
 	"gobase/mysql"
-	"gobase/redis"
 	"gobase/tcpserver"
 	"gobase/utils"
 )
@@ -19,13 +18,6 @@ import (
 
 // 指标名前缀，需要Reg之前设置
 var MetricsNamePrefix = ""
-
-// Redis统计
-func RegRedis(redis *redis.Redis) {
-	if redis != nil {
-		redis.RegHook(redisHook)
-	}
-}
 
 // GoRedis统计
 func RegGoRedis(redis *goredis.Redis) {

@@ -1,14 +1,13 @@
-package utils
+package goredis
 
 // https://github.com/yuwf/gobase2
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"gobase/utils"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -18,137 +17,12 @@ import (
 // Marshal时会返回一个错误 json: unsupported type: ***
 // 所以下面涉及转化的地方也遵循这个规则
 
-// 获取对象的tag值列表(第一个)和成员的item
-/*
-type Test struct {
-	F1 int `redis:"f1"`
-	F2 int `redis:"f2"`
-}
-*/
-
-// 结构信息
-type StructInfo struct {
-	I      interface{}
-	T      reflect.Type
-	V      reflect.Value
-	Tags   []interface{} // string类型，为了方便外部使用
-	Elemts []reflect.Value
-}
-
-// 根据tag获取结构信息
-func GetStructInfoByTag(i interface{}, tagName string) (*StructInfo, error) {
-	// 验证参数 structptr可以是结构也可以是结构地址
-	var structtype reflect.Type
-	var structvalue reflect.Value
-	vo := reflect.ValueOf(i)
-	if vo.Kind() == reflect.Ptr {
-		if vo.IsNil() {
-			err := errors.New("pointer is nil")
-			return nil, err
-		}
-		structtype = vo.Elem().Type() // 第一层是指针，第二层是结构
-		structvalue = vo.Elem()
-		if structtype.Kind() != reflect.Struct {
-			err := errors.New("not struct or struct pointer")
-			return nil, err
-		}
-	} else if vo.Kind() == reflect.Struct {
-		structtype = vo.Type()
-		structvalue = vo
-	} else {
-		err := errors.New("not struct or struct pointer")
-		return nil, err
-	}
-
-	numField := structtype.NumField()
-	tags := make([]interface{}, 0, numField)
-	elemts := make([]reflect.Value, 0, numField) // 结构中成员的变量地址
-	for i := 0; i < numField; i += 1 {
-		v := structvalue.Field(i)
-		tag := structtype.Field(i).Tag.Get(tagName)
-		if tag == "-" || tag == "" {
-			continue
-		}
-		sAt := strings.IndexByte(tag, ',')
-		if sAt != -1 {
-			tag = tag[0:sAt]
-		}
-		elemts = append(elemts, v)
-		tags = append(tags, tag)
-	}
-
-	sInfo := &StructInfo{
-		I:      i,
-		T:      structtype,
-		V:      structvalue,
-		Tags:   tags,
-		Elemts: elemts,
-	}
-	return sInfo, nil
-}
-
-func (si *StructInfo) FindIndexByTag(tag interface{}) int {
-	for i, f := range si.Tags {
-		if f == tag {
-			return i
-		}
-	}
-	return -1
-}
-
-// 不区分大消息查找
-func (si *StructInfo) FindIndexByTagFold(tag string) int {
-	for i, f := range si.Tags {
-		if strings.EqualFold(f.(string), tag) {
-			return i
-		}
-	}
-	return -1
-}
-
-// 拷贝tag相同的字段，相同类型的引用为浅拷贝
-func (si *StructInfo) CopyTo(sInfo *StructInfo) {
-	for i, v := range si.Elemts {
-		if !v.CanInterface() {
-			continue
-		}
-		if at := sInfo.FindIndexByTag(si.Tags[i]); at != -1 {
-			InterfaceToValue(v.Interface(), sInfo.Elemts[at])
-		}
-	}
-}
-
-// tag和elemt格式化 []interface{}{"f1" F1 "f2" F2} error
-// 无法转化的，或者空数据，填充nil
-// 如果成员是复核对象，则使用json格式化，总之返回值中都是可读的值类型
-func (s *StructInfo) TagElemtFmt() []interface{} {
-	rst := make([]interface{}, 0, len(s.Tags)*2)
-	for i, v := range s.Elemts {
-		rst = append(rst, s.Tags[i])
-		rst = append(rst, ValueFmt(v))
-	}
-	return rst
-}
-
-// 过滤掉nil的
-func (s *StructInfo) TagElemtNoNilFmt() []interface{} {
-	rst := make([]interface{}, 0, len(s.Tags)*2)
-	for i, v := range s.Elemts {
-		vfmt := ValueFmt(v)
-		if vfmt == nil {
-			continue
-		}
-		rst = append(rst, s.Tags[i])
-		rst = append(rst, vfmt)
-	}
-	return rst
-}
-
 // 无法格式化的 返回一个nil
 func ValueFmt(v reflect.Value) interface{} {
-	if !v.CanInterface() {
+	if !v.IsValid() || !v.CanInterface() {
 		return nil
 	}
+
 	switch v.Kind() {
 	case reflect.Bool:
 		return v.Interface()
@@ -219,9 +93,24 @@ func valueFmtJson(v reflect.Value) interface{} {
 	return ""
 }
 
+// 过滤掉nil的
+func TagElemtNoNilFmt(s *utils.StructValue) []interface{} {
+	rst := make([]interface{}, 0, len(s.Tags)*2)
+	for i, v := range s.Elemts {
+		vfmt := ValueFmt(v)
+		if vfmt == nil {
+			continue
+		}
+		rst = append(rst, s.Tags[i])
+		rst = append(rst, vfmt)
+	}
+	return rst
+}
+
 // interface到Value的转化
+// i=nil 或者i指向的对象是nil 时，不报错，直接返回
 // 如果i和v是指针，会取他的Elem，只取一层
-// v对象必须有效
+// v对象必须有效，如果v是指针像自动创建写法  i *int; reflect.ValueOf(&i).Elem()
 // 相同的值类型都是拷贝方式
 // 相同引用类型也是引用赋值，不会拷贝
 // 不同类型转化，都是拷贝的方式，无论引用到引用 或者引用到值
@@ -229,14 +118,14 @@ func valueFmtJson(v reflect.Value) interface{} {
 // Slice 和 Map 他们子元素类型一样 也能相互转化 slice->map slice必须是偶数 Map->slice待验证
 func InterfaceToValue(i interface{}, v reflect.Value) (rstErr error) {
 	if i == nil {
-		rstErr = fmt.Errorf("nil can not to %s : Not CanSet", v.Type().String())
+		//rstErr = fmt.Errorf("nil can not to %s", v.Type().String())
 		return
 	}
 	io := reflect.ValueOf(i)
 	src := io
 	if src.Kind() == reflect.Pointer || src.Kind() == reflect.Interface {
 		if src.IsNil() {
-			rstErr = fmt.Errorf("nil can not to %s : Not CanSet", v.Type().String())
+			//rstErr = fmt.Errorf("nil can not to %s : Not CanSet", v.Type().String())
 			return
 		}
 		src = src.Elem()
@@ -245,6 +134,7 @@ func InterfaceToValue(i interface{}, v reflect.Value) (rstErr error) {
 	dstNew := false // 记录dst是否调用了new，如果转化失败，在设置会nil
 	if dst.Kind() == reflect.Pointer {
 		if dst.IsNil() {
+			// dst如果是指针 应该填充指针的地址
 			dstNew = true
 			dst.Set(reflect.New(dst.Type().Elem()))
 		}
@@ -255,13 +145,19 @@ func InterfaceToValue(i interface{}, v reflect.Value) (rstErr error) {
 		return
 	}
 
+	// 如果底层直接支持
+	if src.Type().AssignableTo(dst.Type()) {
+		dst.Set(src)
+		return
+	}
+
 	// 防止崩溃
 	defer func() {
 		if r := recover(); r != nil {
 			// 修改返回值
 			rstErr = fmt.Errorf("%s can not to %s : %v", io.String(), v.Type().String(), r)
 
-			caller := GetCallerDesc(2)
+			caller := utils.GetCallerDesc(2)
 			log.Error().Err(rstErr).Str("callPos", caller.Pos()).Msg("InterfaceToValueErr")
 		}
 	}()
@@ -324,7 +220,8 @@ func InterfaceToValue(i interface{}, v reflect.Value) (rstErr error) {
 	}
 
 	if dstNew {
-		dst.SetZero()
+		// 还原nil
+		v.Set(reflect.Zero(v.Type()))
 	}
 
 	rstErr = fmt.Errorf("%s can not to %s : %v", io.Type().String(), v.Type().String(), rstErr)
@@ -337,13 +234,13 @@ func boolToValue(b bool, dst reflect.Value) (bool, error) {
 		dst.SetBool(b)
 		return true, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		dst.SetInt(If[int64](b, 1, 0))
+		dst.SetInt(utils.If[int64](b, 1, 0))
 		return true, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		dst.SetUint(If[uint64](b, 1, 0))
+		dst.SetUint(utils.If[uint64](b, 1, 0))
 		return true, nil
 	case reflect.Float32, reflect.Float64:
-		dst.SetFloat(If[float64](b, 1, 0))
+		dst.SetFloat(utils.If[float64](b, 1, 0))
 		return true, nil
 	case reflect.String:
 		dst.SetString(strconv.FormatBool(b))
@@ -397,7 +294,7 @@ func uintToValue(u uint64, dst reflect.Value) (bool, error) {
 func floatToValue(f float64, dst reflect.Value) (bool, error) {
 	switch dst.Kind() {
 	case reflect.Bool:
-		dst.SetBool(FloatEqual(f, 0))
+		dst.SetBool(utils.FloatEqual(f, 0))
 		return true, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		dst.SetInt(int64(f))
@@ -426,7 +323,7 @@ func arrayToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 		}
 	case reflect.String:
 		if src.Type().Elem().Kind() == reflect.Uint8 {
-			dst.SetString(BytesToString(src.Bytes())) // 需要取Array的地址取值
+			dst.SetString(utils.BytesToString(src.Bytes())) // 需要取Array的地址取值
 			return true, nil
 		}
 	}
@@ -461,7 +358,7 @@ func sliceToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 				dst.SetZero()
 				return true, nil
 			}
-			r, err := strconv.ParseBool(BytesToString(src.Bytes()))
+			r, err := strconv.ParseBool(utils.BytesToString(src.Bytes()))
 			if err == nil {
 				dst.SetBool(r)
 				return true, nil
@@ -474,7 +371,7 @@ func sliceToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 				dst.SetZero()
 				return true, nil
 			}
-			r, err := strconv.ParseInt(BytesToString(src.Bytes()), 10, 0)
+			r, err := strconv.ParseInt(utils.BytesToString(src.Bytes()), 10, 0)
 			if err == nil {
 				dst.SetInt(r)
 				return true, nil
@@ -487,7 +384,7 @@ func sliceToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 				dst.SetZero()
 				return true, nil
 			}
-			r, err := strconv.ParseUint(BytesToString(src.Bytes()), 10, 0)
+			r, err := strconv.ParseUint(utils.BytesToString(src.Bytes()), 10, 0)
 			if err == nil {
 				dst.SetUint(r)
 				return true, nil
@@ -500,7 +397,7 @@ func sliceToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 				dst.SetZero()
 				return true, nil
 			}
-			r, err := strconv.ParseFloat(BytesToString(src.Bytes()), 10)
+			r, err := strconv.ParseFloat(utils.BytesToString(src.Bytes()), 64)
 			if err == nil {
 				dst.SetFloat(r)
 				return true, nil
@@ -529,7 +426,7 @@ func sliceToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 		}
 	case reflect.String:
 		if src.Type().Elem().Kind() == reflect.Uint8 {
-			dst.SetString(BytesToString(src.Bytes()))
+			dst.SetString(utils.BytesToString(src.Bytes()))
 			return true, nil
 		}
 	case reflect.Complex64, reflect.Complex128, reflect.Chan, reflect.Func, reflect.UnsafePointer:
@@ -573,7 +470,7 @@ func stringToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 		}
 		return false, err
 	case reflect.Float32, reflect.Float64:
-		r, err := strconv.ParseFloat(src.String(), 10)
+		r, err := strconv.ParseFloat(src.String(), 64)
 		if err == nil {
 			dst.SetFloat(r)
 			return true, nil
@@ -618,7 +515,7 @@ func stringToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 						return true, nil
 					}
 				} else {
-					err := t.UnmarshalText(StringToBytes(src.String()))
+					err := t.UnmarshalText(utils.StringToBytes(src.String()))
 					if err != nil {
 						return true, nil
 					}
@@ -628,7 +525,7 @@ func stringToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 	}
 	// 其他对象尝试通过json转化 必须指针，否则没有写的必要
 	if dst.CanAddr() && dst.Addr().CanInterface() {
-		err := json.Unmarshal(StringToBytes(src.String()), dst.Addr().Interface())
+		err := json.Unmarshal(utils.StringToBytes(src.String()), dst.Addr().Interface())
 		if err == nil {
 			return true, nil
 		}
@@ -648,7 +545,7 @@ func structToValue(src reflect.Value, dst reflect.Value) (bool, error) {
 	case reflect.String:
 		data, err := json.Marshal(src.Interface())
 		if err == nil {
-			dst.SetString(BytesToString(data))
+			dst.SetString(utils.BytesToString(data))
 			return true, nil
 		}
 		return false, err

@@ -41,18 +41,6 @@ var rowGetScript = goredis.NewScript(`
 	return redis.call('HMGET', KEYS[1], select(2,unpack(ARGV)))
 `)
 
-// 读取数据
-// key：生成的key key不存在返回值为空
-// 参数：第一个是有效期
-// 返回值：err=nil时 1:空 数据为空   2:1 数据存在
-var rowExistScript = goredis.NewScript(`
-	local rst = redis.call('EXPIRE', KEYS[1], ARGV[1])
-	if rst == 0 then
-		return
-	end
-	return 1
-`)
-
 // row 新增数据，直接保存
 // key：生成的key
 // 参数：第一个是有效期 其他: field value field value ..
@@ -64,7 +52,7 @@ var rowAddScript = goredis.NewScript(`
 `)
 
 // row 设置数据，key不存在返回值为空
-// 第一个参数是有效期 其他: field value field value ..
+// 参数：第一个是有效期 其他: field op value field op value ..
 // 返回值 err=nil时 1：空：数据为空  2：OK
 var rowSetScript = goredis.NewScript(`
 	local rst = redis.call('EXPIRE', KEYS[1], ARGV[1])
@@ -74,11 +62,22 @@ var rowSetScript = goredis.NewScript(`
 	if #ARGV == 1 then -- 只有一个过期时间
 		return 'OK'
 	end
-	redis.call('HMSET', KEYS[1], select(2,unpack(ARGV)))
+	local setkv = {}
+	for i = 2, #ARGV, 3 do
+		if ARGV[i+1] == "del" then
+			redis.call('HDEL', KEYS[1], ARGV[i])
+		elseif ARGV[i+1] == "set" then
+			setkv[#setkv+1] = ARGV[i]
+			setkv[#setkv+1] = ARGV[i+2]
+		end
+	end
+	if #setkv > 0 then
+		redis.call('HMSET', KEYS[1], unpack(setkv))
+	end
 	return 'OK'
 `)
 
-// row 修改数据
+// row 修改数据 有返回值
 // key：生成的key，key不存在返回值为空
 // 参数：第一个是有效期 其他: field op value field op value ..
 // 返回值：err=nil时 1：空：没加载数据 2：value value .. 和上面field对应
@@ -91,7 +90,9 @@ var rowModifyScript = goredis.NewScript(`
 	local setkv = {}
 	for i = 2, #ARGV, 3 do
 		fields[#fields+1] = ARGV[i]
-		if ARGV[i+1] == "set" then
+		if ARGV[i+1] == "del" then
+			redis.call('HDEL', KEYS[1], ARGV[i])
+		elseif ARGV[i+1] == "set" then
 			setkv[#setkv+1] = ARGV[i]
 			setkv[#setkv+1] = ARGV[i+2]
 		elseif ARGV[i+1] == "incr" then
@@ -114,7 +115,7 @@ var rowModifyScript = goredis.NewScript(`
 // rows 读取数据
 // key：第一个key为索引key，redis不存在说明数据为空
 // 参数：第一个是有效期 其他：field field ..
-// 返回值：err=nil时 1:空 数据为空  2:{value value ..} {value value ..} .. {}的个数为结果数量 每个{value value}的和上面的field对应，不存在对应的Value填充nil
+// 返回值：err=nil时 1:空 数据为空  2:{value value ..} {value value ..} .. {}的个数为结果数量 每个{value value}的和上面的field对应，不存在对应的value填充nil
 var rowsGetAllScript = goredis.NewScript(`
 	-- 先判断索引key是否存在
 	local rst = redis.call('EXPIRE', KEYS[1], ARGV[1])
@@ -134,36 +135,49 @@ var rowsGetAllScript = goredis.NewScript(`
 	return resp
 `)
 
-// rows 读取数据
-// key：第一个key为索引key，第二个为数据key, datakey不存在返回值为空
+// rows 读取多条数据
+// key：第一个key为索引key，redis不存在说明数据为空，后面的多个key为dataKeyValue, 任何一个dataKeyValue不存在返回值为空
 // 参数：第一个是有效期 其他：field field ..
-// 返回值 err=nil时 1：空：没加载数据 2：value value .. 和上面field对应
-var rowsGetScript = goredis.NewScript(`
-	local rst = redis.call('EXPIRE', KEYS[2], ARGV[1])
+// 返回值：err=nil时 1:空 数据为空  2:{value value ..} {value value ..} .. {}的个数为结果数量 每个{value value}的和上面的field对应，不存在对应的Value填充nil
+var rowsGetsScript = goredis.NewScript(`
+	-- 先判断索引key是否存在
+	local rst = redis.call('EXPIRE', KEYS[1], ARGV[1])
 	if rst == 0 then
 		return
 	end
-	-- 设置索引key的倒计时
-	redis.call('EXPIRE', KEYS[1], ARGV[1])
-	return redis.call('HMGET', KEYS[2], select(2,unpack(ARGV)))
+	local datakeys = redis.call('HMGET', KEYS[1], select(2,unpack(KEYS)))
+	-- 读取key
+	local resp = {}
+	local idx = 1
+	for i = 1, #datakeys do
+		if datakeys[i] then -- 数据不为nil时才填充，nil时不填充
+			local rst = redis.call('EXPIRE', datakeys[i], ARGV[1])
+			if rst == 0 then
+				return -- 数据不一致了 返回空 重新读
+			end
+			resp[idx] = redis.call('HMGET', datakeys[i], select(2,unpack(ARGV)))
+			idx = idx + 1
+		end
+	end
+	return resp
 `)
 
 // rows 读取数据
-// key：第一个key为索引key，第二个为数据key, datakey不存在返回值为空
-// 参数：第一个是有效期
-// 返回值：err=nil时 1:空 数据为空   2:1 数据存在
-var rowsExistScript = goredis.NewScript(`
-	local rst = redis.call('EXPIRE', KEYS[2], ARGV[1])
-	if rst == 0 then
+// key：第一个key为索引key，redis不存在说明数据为空
+// 参数：第一个是有效期 第二个为数据dataKeyValue, dataKeyValue不存在返回值为空 其他：field field ..
+// 返回值 err=nil时 1：空：没加载数据 2：value value .. 和上面field对应
+var rowsGetScript = goredis.NewScript(`
+	local datakey = redis.call('HGET', KEYS[1], ARGV[2])
+	if not datakey then
 		return
 	end
-	-- 设置索引key的倒计时
 	redis.call('EXPIRE', KEYS[1], ARGV[1])
-	return 1
+	redis.call('EXPIRE', datakey, ARGV[1])
+	return redis.call('HMGET', datakey, select(3,unpack(ARGV)))
 `)
 
 // rows 新增数据
-// key：第一个key为索引key 其他数据key列表
+// key：第一个key为索引key 其他数据key列表， 每个key和下面的数据对应
 // 参数：第一个是有效期 其他：num(后面field value的个数) field value field value ..  num field value field value ..
 // 返回值 err=nil时 OK
 var rowsAddScript = goredis.NewScript(`
@@ -226,13 +240,25 @@ var rowsSetScript = goredis.NewScript(`
 	if #ARGV == 1 then -- 只有一个过期时间
 		return 'OK'
 	end
-	redis.call('HMSET', KEYS[2], select(2,unpack(ARGV)))
+	local setkv = {}
+	for i = 2, #ARGV, 3 do
+		if ARGV[i+1] == "del" then
+			redis.call('HDEL', KEYS[2], ARGV[i])
+		elseif ARGV[i+1] == "set" then
+			setkv[#setkv+1] = ARGV[i]
+			setkv[#setkv+1] = ARGV[i+2]
+		end
+	end
+	if #setkv > 0 then
+		redis.call('HMSET', KEYS[2], unpack(setkv))
+	end
+	
 	-- 设置索引key的倒计时
 	redis.call('EXPIRE', KEYS[1], ARGV[1])
 	return 'OK'
 `)
 
-// rows 修改数据
+// rows 修改数据 有返回值
 // key：第一个key为索引key，第二个为数据key, 数据key不存在返回值为空
 // 参数：第一个是有效期 其他: field op value field op value ..
 // 返回值：err=nil时 1：空：没加载数据 2：value value .. 和上面field对应
@@ -245,7 +271,9 @@ var rowsModifyScript = goredis.NewScript(`
 	local setkv = {}
 	for i = 2, #ARGV, 3 do
 		fields[#fields+1] = ARGV[i]
-		if ARGV[i+1] == "set" then
+		if ARGV[i+1] == "del" then
+			redis.call('HDEL', KEYS[2], ARGV[i])
+		elseif ARGV[i+1] == "set" then
 			setkv[#setkv+1] = ARGV[i]
 			setkv[#setkv+1] = ARGV[i+2]
 		elseif ARGV[i+1] == "incr" then
@@ -261,4 +289,29 @@ var rowsModifyScript = goredis.NewScript(`
 	redis.call('EXPIRE', KEYS[1], ARGV[1])
 	-- 返回最新的值
 	return redis.call('HMGET', KEYS[2], unpack(fields))
+`)
+
+// column /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// column 新增数据，直接保存
+// key：生成的key
+// 参数：第一个是有效期 其他：field value field value
+// 返回值：err=nil时 OK
+var columnAddScript = goredis.NewScript(`
+	redis.call('HMSET', KEYS[1], select(2,unpack(ARGV)))
+	redis.call('EXPIRE', KEYS[1], ARGV[1])
+	return 'OK'
+`)
+
+// column 新增数据，直接保存
+// key：生成的key
+// 参数：第一个是有效期 其他：field value
+// 返回值：err=nil时 OK  空不存在
+var columnSetScript = goredis.NewScript(`
+	local exists = redis.call('HEXISTS', key, ARGV[2])
+	if exists == 0 then
+		return
+	end
+	redis.call('HMSET', KEYS[1], ARGV[2], ARGV[3])
+	redis.call('EXPIRE', KEYS[1], ARGV[1])
+	return 'OK'
 `)

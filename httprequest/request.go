@@ -282,7 +282,7 @@ func (h *HttpRequest) call_(ctx context.Context) {
 	}
 }
 
-//连接池
+// 连接池
 var lock sync.RWMutex
 var httpPool map[string]*http.Client = make(map[string]*http.Client)
 
@@ -325,9 +325,7 @@ func (h *HttpRequest) done(ctx context.Context) {
 
 	// 日志
 	if h.URL != nil {
-		if ctx != nil && ctx.Value(CtxKey_nolog) != nil {
-			// 不输出日志
-		} else {
+		if !utils.CtxHasNolog(ctx) && zerolog.DebugLevel >= log.Logger.GetLevel() {
 			if h.Err != nil {
 				h.log(ctx, int(zerolog.ErrorLevel), h.Elapsed, "HttpRequest Err")
 			} else {

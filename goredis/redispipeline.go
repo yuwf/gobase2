@@ -27,9 +27,16 @@ func (r *Redis) NewPipeline() *RedisPipeline {
 
 // 统一的命令
 func (p *RedisPipeline) Cmd(ctx context.Context, args ...interface{}) *RedisCommond {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
+	ctx = utils.CtxCaller(ctx, 1)
+	redisCmd := &RedisCommond{
+		ctx: ctx,
 	}
+	p.Pipeliner.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
+	return redisCmd
+}
+
+func (p *RedisPipeline) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -44,9 +51,7 @@ func (p *RedisPipeline) ExecNoNil(ctx context.Context) ([]redis.Cmder, error) {
 
 // 管道结合脚本，管道先按evalsha执行，管道中所有命令执行完之后，如果有脚本未加载的错误就再执行一次，所以这种管道无法保证命令顺序
 func (p *RedisPipeline) Script(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) *redis.Cmd {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -68,9 +73,7 @@ func (p *RedisPipeline) Script(ctx context.Context, script *RedisScript, keys []
 }
 
 func (p *RedisPipeline) Script2(ctx context.Context, script *RedisScript, keys []string, args ...interface{}) *RedisCommond {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -94,9 +97,7 @@ func (p *RedisPipeline) Script2(ctx context.Context, script *RedisScript, keys [
 
 // 参数v 参考Redis.HMGetObj的说明
 func (p *RedisPipeline) HMGetObj(ctx context.Context, key string, v interface{}) error {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -113,22 +114,20 @@ func (p *RedisPipeline) HMGetObj(ctx context.Context, key string, v interface{})
 	redisCmd.BindValues(sInfo.Elemts) // 管道里这个不会返回错误
 
 	args := []interface{}{"hmget", key}
-	args = append(args, sInfo.Tags...)
+	args = append(args, sInfo.TagsSlice()...)
 	cmd := p.Pipeliner.Do(context.WithValue(ctx, CtxKey_rediscmd, redisCmd), args...)
 	return cmd.Err()
 }
 
 // 参数v 参考Redis.HMGetObj的说明
 func (p *RedisPipeline) HMSetObj(ctx context.Context, key string, v interface{}) error {
-	if ctx.Value(utils.CtxKey_caller) == nil {
-		ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
-	}
+	ctx = utils.CtxCaller(ctx, 1)
 	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("RedisPipeline HMSetObj Param error")
 		return err
 	}
-	fargs := sInfo.TagElemtNoNilFmt()
+	fargs := TagElemtNoNilFmt(sInfo)
 	if len(fargs) == 0 {
 		return nil // 没有值写入，直接返回
 	}

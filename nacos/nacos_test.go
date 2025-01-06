@@ -57,7 +57,7 @@ func BenchmarkListenConfig(b *testing.B) {
 	//defaultClient.DelConfig("test", "test")
 
 	var l loader.StrLoader
-	defaultClient.ListenConfig("test", "test", &l, true)
+	defaultClient.ListenConfig("test", "test", &l, false)
 	//time.Sleep(time.Second * 10)
 	//defaultClient.CancelListenConfig("test", "test")
 	time.Sleep(time.Hour)

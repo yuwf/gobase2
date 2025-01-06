@@ -11,8 +11,6 @@ import (
 	"github.com/afex/hystrix-go/hystrix"
 )
 
-const CtxKey_nolog = utils.CtxKey_nolog // 不打印日志，错误日志还会打印 值：不受限制 一般写1
-
 func init() {
 	// 因为报警依赖httprequest， 所以下面的报警直接在alert中添加好了
 	//alert.AddErrorLogPrefix("HttpRequest Err")

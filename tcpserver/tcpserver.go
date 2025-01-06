@@ -169,7 +169,7 @@ func (s *TCPServer[ClientId, ClientInfo]) Start(reusePort bool) error {
 	err := s.listener.Start(reusePort)
 	if err != nil {
 		atomic.StoreInt32(&s.state, 0)
-		log.Error().Str("Addr", s.Address).Msg("TCPServer already Start")
+		log.Error().Err(err).Str("Addr", s.Address).Msg("TCPServer Start error")
 		return err
 	}
 

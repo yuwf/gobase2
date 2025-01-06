@@ -200,7 +200,7 @@ func (r *Redis) CreateRegister(key string, cfg *RegistryInfo) *Register {
 		key:    key,
 		values: []string{},
 		state:  0,
-		ctx:    context.WithValue(context.WithValue(context.TODO(), CtxKey_nolog, 1), CtxKey_nonilerr, 1), // 不要日志 不要nil错误
+		ctx:    context.WithValue(utils.CtxNolog(context.TODO()), CtxKey_nonilerr, 1), // 不要日志 不要nil错误
 		quit:   make(chan int),
 	}
 	// 生成注册的value
@@ -215,7 +215,7 @@ func (r *Redis) CreateRegisterEx(key string, cfgs []*RegistryInfo) *Register {
 		key:    key,
 		values: []string{},
 		state:  0,
-		ctx:    context.WithValue(context.WithValue(context.TODO(), CtxKey_nolog, 1), CtxKey_nonilerr, 1), // 不要日志 不要nil错误
+		ctx:    context.WithValue(utils.CtxNolog(context.TODO()), CtxKey_nonilerr, 1), // 不要日志 不要nil错误
 		quit:   make(chan int),
 	}
 	// 生成注册的value
@@ -292,7 +292,7 @@ func (r *Register) loop() {
 
 func (r *Register) zadd() error {
 	ctx := context.WithValue(r.ctx, CtxKey_cmddesc, "Register")
-	ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
+	ctx = utils.CtxCaller(ctx, 1)
 	listKey := fmt.Sprintf(regListFmt, r.key)    // 服务器列表
 	channel := fmt.Sprintf(regChannelFmt, r.key) // 广播channel
 	keys := []string{r.key, listKey}
@@ -310,7 +310,7 @@ func (r *Register) zadd() error {
 
 func (r *Register) zrem() error {
 	ctx := context.WithValue(r.ctx, CtxKey_cmddesc, "Register")
-	ctx = context.WithValue(ctx, utils.CtxKey_caller, utils.GetCallerDesc(1))
+	ctx = utils.CtxCaller(ctx, 1)
 	listKey := fmt.Sprintf(regListFmt, r.key)    // 服务器列表
 	channel := fmt.Sprintf(regChannelFmt, r.key) // 广播channel
 	keys := []string{r.key, listKey}
