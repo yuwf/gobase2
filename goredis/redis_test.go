@@ -273,25 +273,40 @@ func BenchmarkRedisWatchRegister(b *testing.B) {
 	infos := []*RegistryInfo{
 		{
 			RegistryName:   "Name",
-			RegistryID:     "456",
+			RegistryID:     "123",
 			RegistryAddr:   "192.168.0.1",
 			RegistryPort:   123,
 			RegistryScheme: "tcp",
 		},
 		{
 			RegistryName: "Name",
-			RegistryID:   "123",
+			RegistryID:   "456",
 			RegistryAddr: "192.168.0.1",
-			RegistryPort: 123,
+			RegistryPort: 456,
 		},
 	}
-	r := redis.CreateRegisterEx("testregister", infos)
+	r := redis.CreateRegisters("testregister", infos)
 	r.Reg()
 
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second * 10)
+	r.Add(&RegistryInfo{
+		RegistryName: "Name",
+		RegistryID:   "789",
+		RegistryAddr: "192.168.0.1",
+		RegistryPort: 789,
+	})
+	time.Sleep(time.Second * 5)
+	r.Remove(&RegistryInfo{
+		RegistryName: "Name",
+		RegistryID:   "456",
+		RegistryAddr: "192.168.0.1",
+		RegistryPort: 456,
+	})
+	time.Sleep(time.Second * 5)
 	r.DeReg()
-	time.Sleep(time.Second * 3)
+	time.Sleep(time.Second * 5)
 	r.Reg()
+	time.Sleep(time.Second * 5)
 	//time.Sleep(time.Second * 1)
 	//r.DeReg()
 	//time.Sleep(time.Second * 1)

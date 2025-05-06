@@ -3,9 +3,7 @@ package mrcache
 // https://github.com/yuwf/gobase2
 
 import (
-	"context"
 	"errors"
-	"gobase/utils"
 	"sync"
 	"time"
 )
@@ -27,51 +25,72 @@ var Expire = 36 * 3600 // 支持修改
 
 var IncrementKey = "_mrcache_increment_" // 自增key，hash结构，field使用table名
 
-// Add、Set Modify
-const CtxKey_NR = utils.CtxKey("_cache_no_resp_")          // 不需要返回值，有时为了优化性能不需要返回值
-const CtxKey_NEC = utils.CtxKey("_cache_no_exist_create_") // 不存在就创建
-
-// 不需要返回值
-func NoResp(parent context.Context) context.Context {
-	if parent == nil {
-		parent = context.TODO()
-	} else {
-		if parent.Value(CtxKey_NR) != nil {
-			return parent
-		}
-	}
-	return context.WithValue(parent, CtxKey_NR, 1)
+type Options struct {
+	noResp        bool // 不需要返回值，有时为了优化性能不需要返回值
+	noExistCreate bool // 不存在就创建
 }
 
-// 不存在时创建
-func NoExistCreate(parent context.Context) context.Context {
-	if parent == nil {
-		parent = context.TODO()
-	} else {
-		if parent.Value(CtxKey_NEC) != nil {
-			return parent
-		}
-	}
-	return context.WithValue(parent, CtxKey_NEC, 1)
+func NewOptions() *Options {
+	return &Options{}
+}
+
+func NoRespOptions() *Options {
+	return NewOptions().NoResp()
+}
+
+func CreateOptions() *Options {
+	return NewOptions().Create()
+}
+
+func (o *Options) NoResp() *Options {
+	o.noResp = true
+	return o
+}
+func (o *Options) Create() *Options {
+	o.noExistCreate = true
+	return o
 }
 
 // 查询数据不存在的缓存，防止缓存穿透
+// 这里的防的是穿透到mysql，redis层没防穿透逻辑
 var passCache sync.Map
+var passExpire = int64(8 * 1000)
 
 func GetPass(key string) bool {
 	passTime, ok := passCache.Load(key)
 	if !ok {
 		return false
 	}
-	if time.Now().Unix()-passTime.(int64) >= 4 {
+	if time.Now().UnixMilli()-passTime.(int64) >= passExpire {
 		passCache.Delete(key)
 		return false
 	}
 	return true
 }
 
+// 返回是否全部标记了
+func GetPasss(keys []string) bool {
+	for _, key := range keys {
+		passTime, ok := passCache.Load(key)
+		if !ok {
+			return false
+		}
+		if time.Now().UnixMilli()-passTime.(int64) >= passExpire {
+			passCache.Delete(key)
+			return false
+		}
+	}
+	return true
+}
+
 func SetPass(key string) {
-	passCache.Store(key, time.Now().Unix())
+	passCache.Store(key, time.Now().UnixMilli())
+}
+
+func SetPasss(keys []string) {
+	for _, key := range keys {
+		passCache.Store(key, time.Now().UnixMilli())
+	}
 }
 
 func DelPass(key string) {

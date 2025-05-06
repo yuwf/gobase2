@@ -11,12 +11,6 @@ import (
 	"github.com/afex/hystrix-go/hystrix"
 )
 
-func init() {
-	// 因为报警依赖httprequest， 所以下面的报警直接在alert中添加好了
-	//alert.AddErrorLogPrefix("HttpRequest Err")
-	//alert.AddErrorLogPrefix("HttpRequest TimeOut")
-}
-
 // 参数配置
 type ParamConfig struct {
 	// 日志级别和zerolog.Level一致

@@ -18,8 +18,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const CtxKey_nonilerr = utils.CtxKey("nonilerr") // 命令移除空错误 值：不受限制 一般写1
-const CtxKey_rediscmd = utils.CtxKey("rediscmd") // 值：RedisCommand对象 一般情况内部使用
+const CtxKey_nonilerr = utils.CtxKey("nonilerr")   // 命令移除空错误 值：不受限制 一般写1
+const CtxKey_rediscmd = utils.CtxKey("rediscmd")   // 值：RedisCommand对象 一般情况内部使用
+const CtxKey_addcaller = utils.CtxKey("addcaller") // 值：1 标记redis封装层有没有添加caller
 
 const CtxKey_cmddesc = utils.CtxKey("cmddesc")       // 值：字符串 命令描述 一般情况内部使用
 const CtxKey_noscript = utils.CtxKey("noscript")     // 屏蔽NOSCRIPT的错误提示(在使用Reids.Run命令时建议使用)， 值：不受限制 一般情况内部使用
@@ -115,7 +116,7 @@ func (r *Redis) RegHook(f func(ctx context.Context, cmd *RedisCommond)) {
 
 // 支持返回值绑定的函数
 func (r *Redis) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
-	ctx = utils.CtxCaller(ctx, 1)
+	ctx = context.WithValue(utils.CtxCaller(ctx, 1), CtxKey_addcaller, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -129,7 +130,7 @@ func (r *Redis) Do2(ctx context.Context, args ...interface{}) *RedisCommond {
 // 结构成员其他类型 : 通过Json转化
 // 传入的参数为结构的地址
 func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
-	ctx = utils.CtxCaller(ctx, 1)
+	ctx = context.WithValue(utils.CtxCaller(ctx, 1), CtxKey_addcaller, 1)
 	redisCmd := &RedisCommond{
 		ctx: ctx,
 	}
@@ -156,7 +157,7 @@ func (r *Redis) HMGetObj(ctx context.Context, key string, v interface{}) error {
 
 // 参数v 参考Redis.HMGetObj的说明
 func (r *Redis) HMSetObj(ctx context.Context, key string, v interface{}) error {
-	ctx = utils.CtxCaller(ctx, 1)
+	ctx = context.WithValue(utils.CtxCaller(ctx, 1), CtxKey_addcaller, 1)
 	sInfo, err := utils.GetStructInfoByTag(v, RedisTag)
 	if err != nil {
 		utils.LogCtx(log.Error(), ctx).Err(err).Msg("Redis HMSetObj Param error")
@@ -182,7 +183,9 @@ func getCmd(query, def string) string {
 }
 
 func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Time) {
-	ctx = utils.CtxCaller(ctx, 5) // // 有些命令不准确
+	if ctx.Value(CtxKey_addcaller) == nil {
+		ctx = utils.CtxCaller(ctx, 5) // // 有些命令不准确
+	}
 	// 构造或查找RedisCommond
 	var redisCmd *RedisCommond
 	rediscmd, ok := ctx.Value(CtxKey_rediscmd).(*RedisCommond)
@@ -246,7 +249,9 @@ func (r *Redis) cmdCallback(ctx context.Context, cmd redis.Cmder, entry time.Tim
 }
 
 func (r *Redis) pipelineCallback(ctx context.Context, cmds []redis.Cmder, err error, entry time.Time) error {
-	ctx = utils.CtxCaller(ctx, 4)
+	if ctx.Value(CtxKey_addcaller) == nil {
+		ctx = utils.CtxCaller(ctx, 4) // // 有些命令不准确
+	}
 	// 构造或查找RedisCommond
 	var redisCmd *RedisCommond
 	rediscmd, ok := ctx.Value(CtxKey_rediscmd).(*RedisCommond)

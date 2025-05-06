@@ -33,15 +33,16 @@ func (m TestJ) Value() (driver.Value, error) {
 
 // db中
 type Test struct {
-	Id         int       `db:"Id" json:"Id,omitempty"`                      //自增住建  不可为空
+	Id         int       `db:"Id" json:"Id,omitempty"`                              //自增住建  不可为空
 	CreateTime time.Time `db:"create_time" redis:"ct" json:"create_time,omitempty"` //用户ID  redis 记录ct
 	UpdateTime time.Time `db:"update_time" redis:"ut" json:"update_time,omitempty"` //用户ID  redis 记录ut
-	UID        int       `db:"UID" redis:"U" json:"UID,omitempty"`          //用户ID  redis 记录U
-	Type       int       `db:"Type" json:"Type,omitempty"`                  //用户ID  不可为空
-	Name       string    `db:"Name" json:"Name,omitempty"`                  //名字  不可为空
-	Age        int       `db:"Age" json:"Age,omitempty"`                    //年龄
-	Mark       *string   `db:"Mark" json:"Mark,omitempty"`                  //标记 可以为空
-	Json       *TestJ    `db:"Json" json:"Json,omitempty"`                  //标记 可以为空
+	UID        int       `db:"UID" redis:"U" json:"UID,omitempty"`                  //用户ID  redis 记录U
+	Type       int       `db:"Type" json:"Type,omitempty"`                          //用户ID  不可为空
+	GroupType  string    `db:"GroupType" json:"GroupType,omitempty"`                //用户ID  不可为空
+	Name       string    `db:"Name" json:"Name,omitempty"`                          //名字  不可为空
+	Age        int       `db:"Age" json:"Age,omitempty"`                            //年龄
+	Mark       *string   `db:"Mark" json:"Mark,omitempty"`                          //标记 可以为空
+	Json       *TestJ    `db:"Json" json:"Json,omitempty"`                          //标记 可以为空
 }
 
 var cacheRow *CacheRow[Test]
@@ -52,6 +53,8 @@ var cacheColumnS *CacheColumn[Test, string]
 
 func init() {
 	DBNolog = false // 输出底层日志
+	passExpire = int64(1000 * 1000)
+
 	var mysqlCfg = &mysql.Config{
 		Source: "root:1235@tcp(localhost:3306)/mysql?charset=utf8&parseTime=true&loc=Local", // 这里必须添加上&parseTime=true&loc=Local 否则time.Time解析不了
 	}
@@ -99,6 +102,7 @@ func init() {
 		update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 		UID bigint NOT NULL DEFAULT '0' COMMENT '用户ID',
 		Type int NOT NULL DEFAULT '0' COMMENT '用户类型',
+		GroupType varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '""' COMMENT '组',
 		Name varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '""' COMMENT '名字',
 		Age int DEFAULT NULL COMMENT '年龄',
 		Mark varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci COMMENT '标记',
@@ -112,19 +116,18 @@ func init() {
 		return
 	}
 
-	sql = `INSERT INTO test (Id,UID,Type,Name,Age,Mark,Json) VALUES
-	(1, 123, 0,"Name123_0",  0, "Mark123_0",null),
-	(2, 123, 1,"Name123_1", 10, "Mark123_1",null),
-	(3, 123, 2,"Name123_2", 20, "Mark123_2",null),
-	(4, 123, 3,"Name123_3", 30, "Mark123_3",null),
-	(5, 123, 4,"Name123_4", 40, "Mark123_4","{\"Id\":123, \"Name\":\"MyName\"}"),
-	(6, 123, 5,"Name123_5", 50, "Mark123_5",null),
-	(7, 123, 6,"Name123_6", 60, "Mark123_6",null),
-	(8, 123, 7,"Name123_7", 70, "Mark123_7",null),
-	(9, 123, 8,"Name123_8", 80, "Mark123_8",null),
-	(10,123, 9,"Name123_9", 90, "Mark123_9",null);
+	sql = `INSERT INTO test (Id,UID,Type,GroupType,Name,Age,Mark,Json) VALUES
+	(1, 123, 0, "G0", "Name123_0",  0, "Mark123_0",null),
+	(2, 123, 1, "G0", "Name123_1", 10, "Mark123_1",null),
+	(3, 123, 2, "G0", "Name123_2", 20, "Mark123_2",null),
+	(4, 123, 3, "G0", "Name123_3", 30, "Mark123_3",null),
+	(5, 123, 4, "G0", "Name123_4", 40, "Mark123_4","{\"Id\":123, \"Name\":\"MyName\"}"),
+	(6, 123, 5, "G0", "Name123_5", 50, "Mark123_5",null),
+	(7, 123, 6, "G0", "Name123_6", 60, "Mark123_6",null),
+	(8, 123, 7, "G0", "Name123_7", 70, "Mark123_7",null),
+	(9, 123, 8, "G1", "Name123_8", 80, "Mark123_8",null),
+	(10,123, 9, "G1", "Mark123_9", 90, "Mark123_9",null);
 	`
-
 	_, err = mysql.DefaultMySQL().Exec(ctx, sql)
 	if err != nil {
 		return
@@ -157,7 +160,7 @@ func init() {
 	}
 
 	// 多行
-	cacheRows, err = NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, "Type")
+	cacheRows, err = NewCacheRows[Test](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, []string{"Type", "GroupType"})
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
@@ -174,7 +177,7 @@ func init() {
 	}
 
 	// 列
-	cacheColumn, err = NewCacheColumn[Test, *int](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, "Type", "Age")
+	cacheColumn, err = NewCacheColumn[Test, *int](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, []string{"Type"}, "Age")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
@@ -190,7 +193,7 @@ func init() {
 		return
 	}
 
-	cacheColumnJ, err = NewCacheColumn[Test, TestJ](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, "Type", "Json")
+	cacheColumnJ, err = NewCacheColumn[Test, TestJ](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, []string{"Type"}, "Json")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
@@ -206,7 +209,7 @@ func init() {
 		return
 	}
 
-	cacheColumnS, err = NewCacheColumn[Test, string](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, "Type", "Json")
+	cacheColumnS, err = NewCacheColumn[Test, string](goredis.DefaultRedis(), mysql.DefaultMySQL(), "test", 0, 0, []string{"UID"}, []string{"Type"}, "Json")
 	if err != nil {
 		log.Error().Err(err).Msg("ConfigHashTag Err")
 		return
@@ -291,14 +294,14 @@ func BenchmarkRowAdd(b *testing.B) {
 		Age:  1000,
 	}
 	// 添加一个不存在的
-	cacheRow.Add(context.TODO(), []interface{}{124, 8}, s)
+	cacheRow.Add(context.TODO(), []interface{}{124, 8}, s, nil)
 	// 添加一个不存在的
 	sm := map[string]interface{}{
 		"Name": "Hello127",
 		"Age":  nil,
 		"Mark": nil,
 	}
-	cacheRow.Add(context.TODO(), []interface{}{124, 9}, sm)
+	cacheRow.Add(context.TODO(), []interface{}{124, 9}, sm, NoRespOptions()) // 不需要返回值
 }
 
 func BenchmarkRowDel(b *testing.B) {
@@ -353,15 +356,11 @@ func BenchmarkRowSet(b *testing.B) {
 		Age:  10000,
 	}
 	// 设置一个存在的
-	cacheRow.Set(NoResp(context.TODO()), []interface{}{123, 8}, s) // 没有返回值
+	cacheRow.Set(context.TODO(), []interface{}{123, 8}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second*2)
 	s.Age = 1010
-	cacheRow.Set(NoResp(context.TODO()), []interface{}{123, 8}, s) 
-
-	fmt.Println("主线程1")
-	time.Sleep(time.Second*15)
-	fmt.Println("主线程2")
-	cacheRow.Get(context.TODO(), []interface{}{123, 8})
-
+	cacheRow.Set(context.TODO(), []interface{}{123, 8}, s, NoRespOptions())
+	time.Sleep(time.Second*2)
 
 	sm := map[string]interface{}{
 		"Name": "Hello",
@@ -369,11 +368,11 @@ func BenchmarkRowSet(b *testing.B) {
 		"Mark": nil,
 	}
 	// 设置一个不存在的
-	cacheRow.Set(NoExistCreate(context.TODO()), []interface{}{126, 3}, sm)
+	cacheRow.Set(context.TODO(), []interface{}{126, 3}, sm, CreateOptions())
 	cacheRow.Get(context.TODO(), []interface{}{126, 3})
 
 	// 设置一个不存在的 不创建
-	cacheRow.Set(context.TODO(), []interface{}{126, 4}, sm)
+	cacheRow.Set(context.TODO(), []interface{}{126, 4}, sm, nil)
 	cacheRow.Get(context.TODO(), []interface{}{126, 4})
 
 	sm = map[string]interface{}{
@@ -381,7 +380,8 @@ func BenchmarkRowSet(b *testing.B) {
 		"Age":  nil,
 	}
 	// 设置一个存在的
-	cacheRow.Set(NoResp(context.TODO()), []interface{}{123, 8}, sm) // 没有返回值
+	cacheRow.Set(context.TODO(), []interface{}{123, 8}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second*2)
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
 	cacheRow.Get(context.TODO(), []interface{}{123, 8}) // 有年龄大条件过滤，获取不到
 }
@@ -399,19 +399,19 @@ func BenchmarkRowModify(b *testing.B) {
 
 	// 先删除
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
-	cacheRow.Del(context.TODO(), []interface{}{126, 2})
-	cacheRow.Del(context.TODO(), []interface{}{126, 3})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 2})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 3})
 
 	s := &ModifyTest{
 		Name: "Hello",
 		Age:  100,
 	}
 	// 设置一个不存在的
-	cacheRow.Modify(NoExistCreate(context.TODO()), []interface{}{126, 2}, s)
+	cacheRow.Modify(context.TODO(), []interface{}{126, 2}, s, CreateOptions())
 	cacheRow.Get(context.TODO(), []interface{}{126, 2})
 
 	// 设置一个不存在的 不创建
-	cacheRow.Modify(context.TODO(), []interface{}{126, 3}, s)
+	cacheRow.Modify(context.TODO(), []interface{}{126, 3}, s, nil)
 	cacheRow.Get(context.TODO(), []interface{}{126, 3})
 
 	s = &ModifyTest{
@@ -419,7 +419,8 @@ func BenchmarkRowModify(b *testing.B) {
 		Age:  10000,
 	}
 	// 设置一个存在的
-	cacheRow.Modify(NoResp(context.TODO()), []interface{}{123, 8}, s) // 没有返回值
+	cacheRow.Modify(context.TODO(), []interface{}{123, 8}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second*2)
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
 
 	sm := map[string]interface{}{
@@ -427,11 +428,11 @@ func BenchmarkRowModify(b *testing.B) {
 		"Age":  100,
 	}
 	// 设置一个不存在的
-	cacheRow.Modify(NoExistCreate(context.TODO()), []interface{}{126, 3}, sm)
+	cacheRow.Modify(context.TODO(), []interface{}{126, 3}, sm, CreateOptions())
 	cacheRow.Get(context.TODO(), []interface{}{126, 3})
 
 	// 设置一个不存在的 不创建
-	cacheRow.Modify(context.TODO(), []interface{}{126, 4}, sm)
+	cacheRow.Modify(context.TODO(), []interface{}{126, 4}, sm, nil)
 	cacheRow.Get(context.TODO(), []interface{}{126, 4})
 
 	sm = map[string]interface{}{
@@ -439,10 +440,12 @@ func BenchmarkRowModify(b *testing.B) {
 		"Age":  10000,
 	}
 	// 设置一个存在的
-	cacheRow.Modify(NoResp(context.TODO()), []interface{}{123, 8}, sm) // 没有返回值
+	cacheRow.Modify(context.TODO(), []interface{}{123, 8}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second*2)
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
 	cacheRow.Get(context.TODO(), []interface{}{123, 8})
 
+	// 性能测试下 转化耗时
 	cacheRow.Get(context.TODO(), []interface{}{126, 2})
 	ctx := utils.CtxNolog(context.TODO())
 	entry := time.Now()
@@ -478,7 +481,10 @@ func BenchmarkRowModify2(b *testing.B) {
 
 	// 先删除
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
-	cacheRow.Del(context.TODO(), []interface{}{126, 2})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 2})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 3})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 4})
+	cacheRow.DelCache(context.TODO(), []interface{}{126, 5})
 
 	str := "tttt"
 	s := &ModifyTest{
@@ -487,11 +493,12 @@ func BenchmarkRowModify2(b *testing.B) {
 		Mark: &str,
 	}
 	// 设置一个不存在的
-	cacheRow.Modify2(NoExistCreate(context.TODO()), []interface{}{126, 2}, s)
+	cacheRow.Modify2(context.TODO(), []interface{}{126, 2}, s, CreateOptions())
 	cacheRow.Get(context.TODO(), []interface{}{126, 2})
 
 	// 设置一个不存在的 不创建
-	cacheRow.Modify2(context.TODO(), []interface{}{126, 3}, s)
+	cacheRow.Modify2(context.TODO(), []interface{}{126, 3}, s, nil)
+	time.Sleep(time.Second*2)
 	cacheRow.Get(context.TODO(), []interface{}{126, 3})
 
 	s = &ModifyTest{
@@ -499,39 +506,30 @@ func BenchmarkRowModify2(b *testing.B) {
 		Age:  10000,
 	}
 	// 设置一个存在的
-	cacheRow.Modify2(NoResp(context.TODO()), []interface{}{123, 8}, s) // 设置没有返回值是无效 ModifyM2一定有返回值
+	cacheRow.Modify2(context.TODO(), []interface{}{123, 8}, s, NoRespOptions()) // 设置没有返回值是无效 ModifyM2一定有返回值
+	time.Sleep(time.Second*2)
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
 	cacheRow.Get(context.TODO(), []interface{}{123, 8})
-}
 
-func BenchmarkRowModifyM2(b *testing.B) {
-	if cacheRow == nil {
-		log.Error().Msg("init not success")
-		return
-	}
-
-	// 先删除
-	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
-	cacheRow.Del(context.TODO(), []interface{}{126, 2})
-
-	s := map[string]interface{}{
+	sm := map[string]interface{}{
 		"Name": "Hello",
 		"Age":  100,
 	}
 	// 设置一个不存在的
-	cacheRow.ModifyM2(NoExistCreate(context.TODO()), []interface{}{126, 2}, s)
-	cacheRow.Get(context.TODO(), []interface{}{126, 2})
+	cacheRow.Modify2(context.TODO(), []interface{}{126, 4}, sm, CreateOptions())
+	cacheRow.Get(context.TODO(), []interface{}{126, 4})
 
 	// 设置一个不存在的 不创建
-	cacheRow.ModifyM2(context.TODO(), []interface{}{126, 3}, s)
-	cacheRow.Get(context.TODO(), []interface{}{126, 3})
+	cacheRow.Modify2(context.TODO(), []interface{}{126, 5}, sm, nil)
+	cacheRow.Get(context.TODO(), []interface{}{126, 5})
 
-	s = map[string]interface{}{
+	sm = map[string]interface{}{
 		"Name": "Hello2",
 		"Age":  nil,
 	}
 	// 设置一个存在的
-	cacheRow.ModifyM2(NoResp(context.TODO()), []interface{}{123, 8}, s) // 设置没有返回值是无效 ModifyM2一定有返回值
+	cacheRow.Modify2(context.TODO(), []interface{}{123, 8}, sm, NoRespOptions()) // 设置没有返回值是无效 ModifyM2一定有返回值
+	time.Sleep(time.Second*2)
 	cacheRow.DelCache(context.TODO(), []interface{}{123, 8})
 	cacheRow.Get(context.TODO(), []interface{}{123, 8})
 }
@@ -559,9 +557,15 @@ func BenchmarkRowsGets(b *testing.B) {
 	// 先删除缓存
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
-	cacheRows.Gets(context.TODO(), []interface{}{123}, []interface{}{4, 15, 5})
+	cacheRows.Gets(context.TODO(), []interface{}{123}, [][]interface{}{{4, "G0"}, {5, "G0"}, {5, "G1"}})
+	// 会重新加载
+	cacheRows.Gets(context.TODO(), []interface{}{123}, [][]interface{}{{5, "G0"}, {3, "G0"}})
+	// 不会重新加载
+	cacheRows.Gets(context.TODO(), []interface{}{123}, [][]interface{}{{4, "G0"}, {5, "G0"}, {5, "G1"}})
 	// 在获取一次
-	cacheRows.Gets(context.TODO(), []interface{}{123}, []interface{}{4, 5, 15})
+	cacheRows.Gets(context.TODO(), []interface{}{123}, [][]interface{}{{5, "G0"}, {4, "G0"}})
+	// 会重新加载
+	cacheRows.Gets(context.TODO(), []interface{}{123}, [][]interface{}{{4, "G0"}, {5, "G0"}, {155, "G1"}})
 }
 
 func BenchmarkRowsGet(b *testing.B) {
@@ -573,12 +577,14 @@ func BenchmarkRowsGet(b *testing.B) {
 	// 先删除缓存
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
-	cacheRows.Get(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 	// 在获取一次
-	cacheRows.Get(context.TODO(), []interface{}{123}, 8)
-
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 	// 不存在的
-	cacheRows.Get(context.TODO(), []interface{}{124}, 8)
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{100, "G1"})
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{100, "G1"})
+	// 不存在的
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{9, "G1"})
 }
 
 func BenchmarkRowsExist(b *testing.B) {
@@ -590,13 +596,13 @@ func BenchmarkRowsExist(b *testing.B) {
 	// 先删除缓存
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
-	cacheRows.Exist(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Exist(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 	// 在获取一次
-	cacheRows.Exist(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Exist(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 
 	// 不存在的
-	cacheRows.Exist(context.TODO(), []interface{}{124}, 8)
-	cacheRows.Exist(context.TODO(), []interface{}{124}, 8)
+	cacheRows.Exist(context.TODO(), []interface{}{123}, []interface{}{18, "G1"})
+	cacheRows.Exist(context.TODO(), []interface{}{124}, []interface{}{8, "G1"})
 }
 
 func BenchmarkRowsAdd(b *testing.B) {
@@ -609,38 +615,44 @@ func BenchmarkRowsAdd(b *testing.B) {
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
 	type AddTest struct {
-		Name string `db:"Name" json:"Name,omitempty"` //名字  不可为空
-		Age  int    `db:"Age" json:"Age,omitempty"`   //年龄
-		Type int    `db:"Type" json:"Type,omitempty"`  //数据字段
+		Name      string `db:"Name" json:"Name,omitempty"`           //名字  不可为空
+		Age       int    `db:"Age" json:"Age,omitempty"`             //年龄
+		Type      int    `db:"Type" json:"Type,omitempty"`           //数据字段
+		GroupType string `db:"GroupType" json:"GroupType,omitempty"` //数据字段
 	}
 	s := &AddTest{
-		Name: "Hello12",
-		Age:  1000,
-		Type: 12,
+		Name:      "Hello12",
+		Age:       1000,
+		Type:      12,
+		GroupType: "G1",
 	}
+	cacheRows.GetAll(context.TODO(), []interface{}{123})
 	// 添加一个不存在的
-	cacheRows.Add(context.TODO(), []interface{}{123}, s)
+	cacheRows.Add(context.TODO(), []interface{}{123}, s, NoRespOptions())
+
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{12, "G1"})
 
 	// 添加一个存在的
 	s.Type = 8
-	cacheRows.Add(context.TODO(), []interface{}{123}, s)
+	cacheRows.Add(context.TODO(), []interface{}{123}, s, nil)
 
 	// 添加一个不存在的
 	sm := map[string]interface{}{
-		"Name": "Hello13",
-		"Age":  10000,
-		"Type": 13,
+		"Name":      "Hello13",
+		"Age":       10000,
+		"Type":      13,
+		"GroupType": "G1",
 	}
-	cacheRows.Add(NoResp(context.TODO()), []interface{}{123}, sm) // 没有返回值
+	cacheRows.Add(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 没有返回值
 
 	// 添加一个存在的
 	sm["Type"] = 8
-	cacheRows.Add(context.TODO(), []interface{}{123}, sm)
+	cacheRows.Add(context.TODO(), []interface{}{123}, sm, nil)
 
 	// nil 测试
 	sm["Age"] = nil
 	sm["Type"] = 14
-	cacheRows.Add(context.TODO(), []interface{}{123}, sm) // 会出错，age默认值是NULL 接受值是int 会转化失败，没有默认值的应该用指针接受
+	cacheRows.Add(context.TODO(), []interface{}{123}, sm, nil) // 数据可以写入，但读取会出错，age默认值是NULL 接受值是int 会转化失败，没有默认值的应该用指针接受
 }
 
 func BenchmarkRowsDel(b *testing.B) {
@@ -652,15 +664,18 @@ func BenchmarkRowsDel(b *testing.B) {
 	// 先删除缓存
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
-	cacheRows.Exist(context.TODO(), []interface{}{123}, 8)
+	cacheRows.GetAll(context.TODO(), []interface{}{123})
 
 	// 删除
-	cacheRows.Del(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Del(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
+
+	cacheRows.Dels(context.TODO(), []interface{}{123}, [][]interface{}{{9, "G1"}, {7, "G0"}})
+	cacheRows.Dels(context.TODO(), []interface{}{123}, [][]interface{}{{9, "G1"}, {7, "G0"}})
 	// 再次删除
-	cacheRows.Del(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Del(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 
 	// 不存在
-	cacheRows.Exist(context.TODO(), []interface{}{123}, 8)
+	cacheRows.Exist(context.TODO(), []interface{}{123}, []interface{}{8, "G1"})
 
 	// 再次删除
 	cacheRows.DelAll(context.TODO(), []interface{}{123})
@@ -676,53 +691,63 @@ func BenchmarkRowsSet(b *testing.B) {
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
 	type SetTest struct {
-		Name string  `db:"Name" json:"Name,omitempty"` //名字
-		Age  int     `db:"Age" json:"Age,omitempty"`   //年龄
-		Type int     `db:"Type" json:"Type,omitempty"`  //数据字段
-		Mark *string `db:"Mark" json:"Mark,omitempty"` //标记 可以为空
+		Name      string  `db:"Name" json:"Name,omitempty"`           //名字
+		Age       int     `db:"Age" json:"Age,omitempty"`             //年龄
+		Type      int     `db:"Type" json:"Type,omitempty"`           //数据字段
+		GroupType string  `db:"GroupType" json:"GroupType,omitempty"` //数据字段
+		Mark      *string `db:"Mark" json:"Mark,omitempty"`           //标记 可以为空
 	}
 
 	ss := "sdfasdf"
 	s := &SetTest{
-		Name: "Hello",
-		Age:  100,
-		Type: 8,
-		Mark: &ss,
+		Name:      "Hello",
+		Age:       100,
+		Type:      8,
+		GroupType: "G1",
+		Mark:      &ss,
 	}
 	// 设置一个存在的
-	cacheRows.Set(context.TODO(), []interface{}{123}, s)
+	cacheRows.Set(context.TODO(), []interface{}{123}, s, nil)
+	time.Sleep(time.Second * 2)
 	// 设置一个存在的 没有返回值
 	s.Age = 1000
-	cacheRows.Set(NoResp(context.TODO()), []interface{}{123}, s) // 没有返回值
+	cacheRows.Set(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的 并创建
 	s.Type = 12
-	cacheRows.Set(NoExistCreate(context.TODO()), []interface{}{123}, s)
-	cacheRows.Get(context.TODO(), []interface{}{123}, 12)
+	cacheRows.Set(context.TODO(), []interface{}{123}, s, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{12, "G1"})
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的，不创建
 	s.Type = 13
-	cacheRows.Set(NoResp(context.TODO()), []interface{}{123}, s) // 没有返回值
+	cacheRows.Set(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	sm := map[string]interface{}{
-		"Name": "Hello",
-		"Age":  100,
-		"Type": 8,
+		"Name":      "Hello",
+		"Age":       100,
+		"Type":      8,
+		"GroupType": "G1",
 	}
 	// 设置一个存在的
-	cacheRows.Set(context.TODO(), []interface{}{123}, sm)
+	cacheRows.Set(context.TODO(), []interface{}{123}, sm, nil)
 	// 设置一个存在的 不要返回值
 	sm["Age"] = 100000
-	cacheRows.Set(NoResp(context.TODO()), []interface{}{123}, sm) // 没有返回值
+	cacheRows.Set(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的 并创建
 	sm["Type"] = 14
-	cacheRows.Set(NoExistCreate(context.TODO()), []interface{}{123}, sm)
-	cacheRows.Get(context.TODO(), []interface{}{123}, 14)
+	cacheRows.Set(context.TODO(), []interface{}{123}, sm, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{14, "G1"})
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的，不创建
 	sm["Type"] = 15
-	cacheRows.Set(NoResp(context.TODO()), []interface{}{123}, sm) // 没有返回值
+	cacheRows.Set(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 }
 
 func BenchmarkRowsModify(b *testing.B) {
@@ -735,55 +760,137 @@ func BenchmarkRowsModify(b *testing.B) {
 	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
 
 	type SetTest struct {
-		Name string  `db:"Name" json:"Name,omitempty"` //名字
-		Age  int     `db:"Age" json:"Age,omitempty"`   //年龄
-		Type int     `db:"Type" json:"Type,omitempty"` //数据字段
-		Mark *string `db:"Mark" json:"Mark,omitempty"` //标记 可以为空
+		Name      string  `db:"Name" json:"Name,omitempty"`           //名字
+		Age       int     `db:"Age" json:"Age,omitempty"`             //年龄
+		Type      int     `db:"Type" json:"Type,omitempty"`           //数据字段
+		GroupType string  `db:"GroupType" json:"GroupType,omitempty"` //数据字段
+		Mark      *string `db:"Mark" json:"Mark,omitempty"`           //标记 可以为空
 	}
 
 	ss := "sdfasdf"
 	s := &SetTest{
-		Name: "Hello",
-		Age:  100,
-		Type: 8,
-		Mark: &ss,
+		Name:      "Hello",
+		Age:       100,
+		Type:      8,
+		GroupType: "G1",
+		Mark:      &ss,
 	}
 	// 设置一个存在的
-	cacheRows.Modify(context.TODO(), []interface{}{123}, s)
+	cacheRows.Modify(context.TODO(), []interface{}{123}, s, nil)
+	time.Sleep(time.Second * 2)
 	// 设置一个存在的 没有返回值
 	s.Age = 1000
-	cacheRows.Modify(NoResp(context.TODO()), []interface{}{123}, s) // 没有返回值
+	cacheRows.Modify(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的 并创建
 	s.Type = 12
-	cacheRows.Modify(NoExistCreate(context.TODO()), []interface{}{123}, s)
-	cacheRows.Get(context.TODO(), []interface{}{123}, 12)
+	cacheRows.Modify(context.TODO(), []interface{}{123}, s, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{12, "G1"})
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的，不创建
 	s.Type = 13
-	cacheRows.Modify(NoResp(context.TODO()), []interface{}{123}, s) // 没有返回值
+	cacheRows.Modify(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	sm := map[string]interface{}{
-		"Name": "Hello",
-		"Age":  100,
-		"Type": 8,
+		"Name":      "Hello",
+		"Age":       100,
+		"Type":      8,
+		"GroupType": "G1",
 	}
 	// 设置一个存在的
-	cacheRows.Modify(context.TODO(), []interface{}{123}, sm)
+	cacheRows.Modify(context.TODO(), []interface{}{123}, sm, nil)
+	time.Sleep(time.Second * 2)
 	// 设置一个存在的 不要返回值
 	sm["Age"] = 100000
-	cacheRows.Modify(NoResp(context.TODO()), []interface{}{123}, sm) // 没有返回值
+	cacheRows.Modify(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的 并创建
 	sm["Type"] = 14
-	cacheRows.Modify(NoExistCreate(context.TODO()), []interface{}{123}, sm)
-	cacheRows.Get(context.TODO(), []interface{}{123}, 14)
+	cacheRows.Modify(context.TODO(), []interface{}{123}, sm, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{14, "G1"})
+	time.Sleep(time.Second * 2)
 
 	// 设置一个不存在的，不创建
 	sm["Type"] = 15
-	cacheRows.Modify(NoResp(context.TODO()), []interface{}{123}, sm) // 没有返回值
+	cacheRows.Modify(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 没有返回值
+	time.Sleep(time.Second * 2)
 }
 
+func BenchmarkRowsModify2(b *testing.B) {
+	if cacheRows == nil {
+		log.Error().Msg("init not success")
+		return
+	}
+
+	// 先删除缓存
+	cacheRows.DelAllCache(context.TODO(), []interface{}{123})
+
+	type SetTest struct {
+		Name      string  `db:"Name" json:"Name,omitempty"`           //名字
+		Age       int     `db:"Age" json:"Age,omitempty"`             //年龄
+		Type      int     `db:"Type" json:"Type,omitempty"`           //数据字段
+		GroupType string  `db:"GroupType" json:"GroupType,omitempty"` //数据字段
+		Mark      *string `db:"Mark" json:"Mark,omitempty"`           //标记 可以为空
+	}
+
+	ss := "sdfasdf"
+	s := &SetTest{
+		Name:      "Hello",
+		Age:       100,
+		Type:      8,
+		GroupType: "G1",
+		Mark:      &ss,
+	}
+	// 设置一个存在的
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, s, nil)
+	time.Sleep(time.Second * 2)
+	// 设置一个存在的 没有返回值
+	s.Age = 1000
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 一定有返回值 设置了NoRespOptions无效
+	time.Sleep(time.Second * 2)
+
+	// 设置一个不存在的 并创建
+	s.Type = 12
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, s, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{12, "G1"})
+	time.Sleep(time.Second * 2)
+
+	// 设置一个不存在的，不创建
+	s.Type = 13
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, s, NoRespOptions()) // 一定有返回值 设置了NoRespOptions无效
+	time.Sleep(time.Second * 2)
+
+	sm := map[string]interface{}{
+		"Name":      "Hello",
+		"Age":       100,
+		"Type":      8,
+		"GroupType": "G1",
+	}
+	// 设置一个存在的
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, sm, nil)
+	time.Sleep(time.Second * 2)
+	// 设置一个存在的 不要返回值
+	sm["Age"] = 100000
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 一定有返回值 设置了NoRespOptions无效
+	time.Sleep(time.Second * 2)
+
+	// 设置一个不存在的 并创建
+	sm["Type"] = 14
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, sm, CreateOptions())
+	cacheRows.Get(context.TODO(), []interface{}{123}, []interface{}{14, "G1"})
+	time.Sleep(time.Second * 2)
+
+	// 设置一个不存在的，不创建
+	sm["Type"] = 15
+	cacheRows.Modify2(context.TODO(), []interface{}{123}, sm, NoRespOptions()) // 一定有返回值 设置了NoRespOptions无效
+	time.Sleep(time.Second * 2)
+}
+
+/*
 func BenchmarkColumnGetAll(b *testing.B) {
 	if cacheRow == nil {
 		log.Error().Msg("init not success")
@@ -831,3 +938,4 @@ func BenchmarkColumnGet(b *testing.B) {
 	cacheColumnS.Get(context.TODO(), []interface{}{124}, 9) // 不存在
 
 }
+*/

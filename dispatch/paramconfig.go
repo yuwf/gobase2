@@ -3,18 +3,11 @@ package dispatch
 // https://github.com/yuwf/gobase2
 
 import (
-	"gobase/alert"
 	"gobase/loader"
 	"gobase/utils"
 
 	"github.com/afex/hystrix-go/hystrix"
 )
-
-func init() {
-	alert.AddErrorLogPrefix("MsgDispatch Reg")
-	alert.AddErrorLogPrefix("MsgDispatch TimeOut")
-	alert.AddErrorLogPrefix("MsgDispatch Hystrix")
-}
 
 // 参数配置
 type ParamConfig struct {

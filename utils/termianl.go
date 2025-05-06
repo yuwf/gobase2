@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// 连接终端
+// 连接终端 接口抽象
 type ConnTermianl interface {
 	// 连接名
 	ConnName() string

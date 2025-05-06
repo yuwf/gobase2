@@ -5,18 +5,11 @@ package ginserver
 import (
 	"strings"
 
-	"gobase/alert"
 	"gobase/loader"
 	"gobase/utils"
 
 	"github.com/afex/hystrix-go/hystrix"
 )
-
-func init() {
-	alert.AddErrorLogPrefix("GinServer RegHandler")
-	alert.AddErrorLogPrefix("GinServer TimeOut")
-	alert.AddErrorLogPrefix("GinServer Hystrix")
-}
 
 // 参数配置
 type ParamConfig struct {

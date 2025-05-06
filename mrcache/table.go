@@ -142,8 +142,8 @@ func (t *TableStruct) int64Value(fieldValue interface{}) int64 {
 // 为了使Map有序和更好的接受返回值，该modify相关的函数设定的结构
 type ModifyData struct {
 	data   map[string]interface{} // 原始值
-	tags   []string               // key field
-	values []interface{}          // 写入的值
+	tags   []string               // key field 要修改的tag
+	values []interface{}          // 写入的值   要修改的值
 	rsts   []reflect.Value        // 用于接受返回的值，创建的方式不一，写了多个构造函数
 }
 
@@ -166,14 +166,3 @@ func (m *ModifyData) TagsRstsMap() map[string]interface{} {
 	return result
 }
 
-// 拷贝tag相同的字段，相同类型的引用为浅拷贝
-func CopyTo(src *utils.StructValue, dest *utils.StructValue) {
-	for i, v := range src.Elemts {
-		if !v.CanInterface() {
-			continue
-		}
-		if at := dest.FindIndexByTag(src.Tags[i]); at != -1 {
-			goredis.InterfaceToValue(v.Interface(), dest.Elemts[at])
-		}
-	}
-}

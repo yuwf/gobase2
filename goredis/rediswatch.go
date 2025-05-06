@@ -4,7 +4,6 @@ package goredis
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -14,7 +13,6 @@ import (
 
 	"gobase/utils"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog/log"
 )
 
@@ -31,7 +29,7 @@ func (r *Redis) WatchServices(key string, serverNames []string, fun func(infos [
 	// 开启读
 	go func() {
 		// 先创建订阅对象
-		subscriber, _ := r.createWaitReadServicesSub(ctx, key)
+		subscriber, _ := r.CreateSubscribe(ctx, key)
 		var last []*RegistryInfo
 		for {
 			// 先读一次
@@ -44,21 +42,14 @@ func (r *Redis) WatchServices(key string, serverNames []string, fun func(infos [
 			}
 			// 等待逻辑
 			if subscriber != nil {
-				message, err := subscriber.ReceiveMessage(ctx)
-				if err != nil {
-					subscriber.Close()
-					subscriber = nil
-					log.Error().Err(err).Msg("Redis Subscribe Receive fail")
-				} else {
-					log.Debug().Interface("reason", message.Payload).Msg("Redis will ReadServices")
+				message, err := subscriber.Receive(ctx)
+				if err == nil {
+					log.Debug().Str("reason", message).Msg("Redis will ReadServices")
+					continue
 				}
-			} else {
-				time.Sleep(time.Second * time.Duration(RegExprieTime))
 			}
-			if subscriber == nil {
-				// 重新创建
-				subscriber, _ = r.createWaitReadServicesSub(ctx, key)
-			}
+			// 其他情况都走Sleep
+			time.Sleep(time.Second * time.Duration(RegExprieTime))
 		}
 	}()
 	// 开启检查
@@ -75,7 +66,7 @@ func (r *Redis) WatchServices2(key string, serverNames []string, fun func(addInf
 	ctx := utils.CtxNolog(context.TODO())
 	go func() {
 		// 先创建订阅对象
-		subscriber, _ := r.createWaitReadServicesSub(ctx, key)
+		subscriber, _ := r.CreateSubscribe(ctx, key)
 		var last []*RegistryInfo
 		for {
 			// 先读一次
@@ -89,21 +80,14 @@ func (r *Redis) WatchServices2(key string, serverNames []string, fun func(addInf
 			}
 			// 等待逻辑
 			if subscriber != nil {
-				message, err := subscriber.ReceiveMessage(ctx)
-				if err != nil {
-					subscriber.Close()
-					subscriber = nil
-					log.Error().Err(err).Msg("Redis Subscribe fail")
-				} else {
-					log.Debug().Interface("reason", message.Payload).Msg("Redis will ReadServices")
+				message, err := subscriber.Receive(ctx)
+				if err == nil {
+					log.Debug().Str("reason", message).Msg("Redis will ReadServices")
+					continue
 				}
-			} else {
-				time.Sleep(time.Second * time.Duration(RegExprieTime))
 			}
-			if subscriber == nil {
-				// 重新创建
-				subscriber, _ = r.createWaitReadServicesSub(ctx, key)
-			}
+			// 其他情况都走Sleep
+			time.Sleep(time.Second * time.Duration(RegExprieTime))
 		}
 	}()
 	// 开启检查
@@ -112,52 +96,14 @@ func (r *Redis) WatchServices2(key string, serverNames []string, fun func(addInf
 	})
 }
 
-// 创建一个订阅对象，并判断订阅成功了
-func (r *Redis) createWaitReadServicesSub(ctx context.Context, key string) (*redis.PubSub, error) {
-	// 创建订阅者
-	subscriber := r.Subscribe(ctx)
-	// 订阅频道
-	channel := fmt.Sprintf(regChannelFmt, key)
-	err := subscriber.Subscribe(ctx, channel)
-	if err != nil {
-		subscriber.Close()
-		log.Error().Err(err).Str("channel", channel).Msg("Redis Subscribe fail")
-		return nil, err
-	}
-	msg, err := subscriber.ReceiveTimeout(ctx, time.Second*3)
-	if err != nil {
-		subscriber.Close()
-		log.Error().Err(err).Str("channel", channel).Msg("Redis Receive fail")
-		return nil, err
-	}
-	switch msg := msg.(type) {
-	case *redis.Subscription:
-		return subscriber, nil // 理论上读取的都是这个
-	case *redis.Pong:
-		return subscriber, nil
-	case *redis.Message:
-		return subscriber, nil
-	default:
-		err := fmt.Errorf("redis: unknown message: %T", msg)
-		log.Error().Err(err).Str("channel", channel).Msg("Redis Receive fail")
-		return nil, err
-	}
-}
-
-var readRegisterScirpt = NewScript(`
-	local t = redis.call('TIME')
-	local n = tonumber(t[1])*1000 + tonumber(t[2])/1000
-	return redis.call('ZREVRANGEBYSCORE', KEYS[1], n, n-tonumber(ARGV[1]))
-`)
-
 // 读取一次服务器列表
 func (r *Redis) ReadServices(ctx context.Context, key string, serverNames []string) ([]*RegistryInfo, error) {
 	ctx = context.WithValue(ctx, CtxKey_cmddesc, "WatchServices")
-	ctx = utils.CtxCaller(ctx, 1)
-	result, err := r.DoScript(ctx, readRegisterScirpt, []string{key}, RegExprieTime*1000).StringSlice()
+	ctx = context.WithValue(utils.CtxCaller(ctx, 1), CtxKey_addcaller, 1)
+	result, err := r.DoScript(ctx, readRegisterScirpt, []string{key}, RegExprieTime).StringSlice()
 	if err != nil {
 		// 错误了 在来一次
-		result, err = r.DoScript(ctx, readRegisterScirpt, []string{key}, RegExprieTime*1000).StringSlice()
+		result, err = r.DoScript(ctx, readRegisterScirpt, []string{key}, RegExprieTime).StringSlice()
 		if err != nil {
 			return nil, err
 		}
@@ -213,12 +159,8 @@ func (r *Redis) loopCheckServicesChange(ctx context.Context, key string) {
 // 返回值表示是否抢占到了
 func (r *Redis) checkServicesChange(ctx context.Context, key string, uuid string) bool {
 	ctx = context.WithValue(ctx, CtxKey_cmddesc, "CheckServices")
-	ctx = utils.CtxCaller(ctx, 1)
-	// 先抢占下
-	lockKey := fmt.Sprintf(regCheckLockerFmt, key) // 抢占锁
-	listKey := fmt.Sprintf(regListFmt, key)        // 服务器列表
-	channel := fmt.Sprintf(regChannelFmt, key)     // 广播channel
-	ok, err := r.DoScript(ctx, checkServicesScirpt, []string{key, listKey, lockKey}, RegExprieTime*1000, channel, uuid).Int()
+	ctx = context.WithValue(utils.CtxCaller(ctx, 1), CtxKey_addcaller, 1)
+	ok, err := r.DoScript(ctx, checkServicesScirpt, []string{key}, RegExprieTime, uuid).Int()
 	if err != nil || ok == 0 {
 		return false
 	}

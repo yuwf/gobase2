@@ -422,7 +422,7 @@ func (c *RedisCommond) BindMap(v interface{}) error {
 					return err
 				}
 				value := reflect.New(elemtype).Elem()
-				if r[i+1] == nil {
+				if r[i+1] != nil {
 					err = InterfaceToValue(r[i+1], value)
 					if err != nil {
 						return err

@@ -35,11 +35,14 @@ func NewCacheRow[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName stri
 }
 
 // 读取数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：是T结构类型的指针
 func (c *CacheRow[T]) Get(ctx context.Context, condValues []interface{}) (_rst_ *T, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
-		l.Interface(c.condFieldsLog, condValues).Err(_err_).Interface("rst", _rst_).Msg("CacheRow Get")
+		if _err_ != nil && _err_ != ErrNullData {
+			l.Err(_err_)
+		}
+		l.Interface(c.condFieldsLog, condValues).Interface("rst", _rst_).Msg("CacheRow Get")
 	}, ErrNullData)()
 
 	// 检查条件变量
@@ -63,8 +66,6 @@ func (c *CacheRow[T]) get(ctx context.Context, key string, condValues []interfac
 		err := c.redis.DoScript2(ctx, rowGetScript, []string{key}, redisParams).BindValues(destInfo.Elemts)
 		if err == nil {
 			return dest, nil
-		} else if goredis.IsNilError(err) && GetPass(key) {
-			return nil, ErrNullData
 		}
 	}
 
@@ -115,6 +116,7 @@ func (c *CacheRow[T]) Gets(ctx context.Context, condValuess ...[]interface{}) (_
 
 // 读取数据
 // condFieldValues：查询条件变量，field:value field必须在c.condFields中都存在
+// 每次先通过数据库查出条件索引来
 // 返回值：[]*T
 func (c *CacheRow[T]) GetAll(ctx context.Context, condFieldValues map[string]interface{}) (_rst_ []*T, _err_ error) {
 	var condFields []string
@@ -153,6 +155,10 @@ func (c *CacheRow[T]) GetAll(ctx context.Context, condFieldValues map[string]int
 }
 
 func (c *CacheRow[T]) gets(ctx context.Context, condValuess [][]interface{}) (_rst_ []*T, _err_ error) {
+	if len(condValuess) == 0 {
+		return make([]*T, 0), nil
+	}
+
 	// 查询结构
 	type Cond[T any] struct {
 		key        string
@@ -222,7 +228,7 @@ func (c *CacheRow[T]) gets(ctx context.Context, condValuess [][]interface{}) (_r
 }
 
 // 读取数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：是否存在
 func (c *CacheRow[T]) Exist(ctx context.Context, condValues []interface{}) (_rst_ bool, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -240,8 +246,6 @@ func (c *CacheRow[T]) Exist(ctx context.Context, condValues []interface{}) (_rst
 	if err == nil {
 		if rstV == 1 {
 			return true, nil
-		} else if GetPass(key) {
-			return false, nil
 		}
 	}
 
@@ -270,17 +274,17 @@ func (c *CacheRow[T]) Exist(ctx context.Context, condValues []interface{}) (_rst
 	}
 }
 
-// 添加数据，需要外部已经确保没有数据了调用此函数，直接添加数据 ctx: CtxKey_NR
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// 添加数据，需要外部已经确保没有数据了调用此函数，直接添加数据
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
-// -     可以是结构或者结构指针，内部的数据是要保存的数据
-// -     data.tags名称需要和T一致，可以是T的一部分
-// -     若data.tags中含有设置的自增字段 或者 条件字段 会忽略掉
+// -     可以是【结构】或者【结构指针】或者【map[string]interface{}】
+// -     结构中tag或者map中的filed的名称需要和T一致，可以是T的一部分
+// -     若其中含有设置的自增字段、condFields，该字段不会写入
 // 返回值
-// _rst_ ： 是T结构类型的指针，修改后的值，含有函【CtxKey_NR】时不返回值
+// _rst_ ： 是T结构类型的指针，修改后的值，设置ops.NoResp()时不返回值 优化性能
 // _incr_： 自增ID，int64类型
 // _err_ ： 操作失败
-func (c *CacheRow[T]) Add(ctx context.Context, condValues []interface{}, data interface{}) (_rst_ *T, _incr_ interface{}, _err_ error) {
+func (c *CacheRow[T]) Add(ctx context.Context, condValues []interface{}, data interface{}, ops *Options) (_rst_ *T, _incr_ interface{}, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
 		l.Interface(c.condFieldsLog, condValues).Interface("data", data).Err(_err_).Interface("rst", _rst_).Interface("incr", _incr_).Msg("CacheRow Add")
 	})()
@@ -291,18 +295,18 @@ func (c *CacheRow[T]) Add(ctx context.Context, condValues []interface{}, data in
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.add(ctx, condValues, dataM)
+		return c.add(ctx, condValues, dataM, ops)
 	} else {
 		// 检查data数据
 		dataInfo, err := c.checkStructData(data)
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.add(ctx, condValues, dataInfo.TagElemsMap())
+		return c.add(ctx, condValues, dataInfo.TagElemsMap(), ops)
 	}
 }
 
-func (c *CacheRow[T]) add(ctx context.Context, condValues []interface{}, data map[string]interface{}) (*T, interface{}, error) {
+func (c *CacheRow[T]) add(ctx context.Context, condValues []interface{}, data map[string]interface{}, ops *Options) (*T, interface{}, error) {
 	// 检查条件变量
 	key, err := c.checkCondValuesGenKey(condValues)
 	if err != nil {
@@ -315,7 +319,7 @@ func (c *CacheRow[T]) add(ctx context.Context, condValues []interface{}, data ma
 	}
 	DelPass(key)
 
-	nr := ctx.Value(CtxKey_NR) != nil
+	nr := ops != nil && ops.noResp
 	if nr {
 		// 不需要返回值
 		return nil, incrValue, nil
@@ -329,7 +333,7 @@ func (c *CacheRow[T]) add(ctx context.Context, condValues []interface{}, data ma
 }
 
 // 删除数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：error
 func (c *CacheRow[T]) Del(ctx context.Context, condValues []interface{}) (_err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -346,11 +350,18 @@ func (c *CacheRow[T]) Del(ctx context.Context, condValues []interface{}) (_err_ 
 	if cmd.Err() != nil {
 		return cmd.Err()
 	}
+
+	if cmd.Val() == 0 && GetPass(key) {
+		return nil
+	}
+
 	err = c.delToMySQL(ctx, NewConds().eqs(c.condFields, condValues)) // 删mysql
 	if err != nil {
 		return err
 	}
 
+	// 删除后 标记下数据pass
+	SetPass(key)
 	return nil
 }
 
@@ -361,6 +372,10 @@ func (c *CacheRow[T]) Dels(ctx context.Context, condValuess ...[]interface{}) (_
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
 		l.Interface(c.condFieldsLog, condValuess).Err(_err_).Msg("CacheRow DelsCache")
 	})()
+
+	if len(condValuess) == 0 {
+		return nil
+	}
 
 	var keys []string
 	for _, condValues := range condValuess {
@@ -377,15 +392,25 @@ func (c *CacheRow[T]) Dels(ctx context.Context, condValuess ...[]interface{}) (_
 		return cmd.Err()
 	}
 
+	if cmd.Val() == 0 && GetPasss(keys) {
+		return nil
+	}
+
 	err := c.delToMySQL(ctx, NewConds().Ins(c.condFields, condValuess...)) // 删mysql
 	if err != nil {
 		return err
+	}
+
+	// 删除后 标记下数据pass
+	for _, key := range keys {
+		SetPass(key)
 	}
 	return nil
 }
 
 // 删除数据
 // condFieldValues：查询条件变量，field:value field必须在c.condFields中都存在
+// 每次先通过数据库查出条件索引来
 // 返回值：error
 func (c *CacheRow[T]) DelAll(ctx context.Context, condFieldValues map[string]interface{}) (_err_ error) {
 	var condFields []string
@@ -434,7 +459,7 @@ func (c *CacheRow[T]) DelAll(ctx context.Context, condFieldValues map[string]int
 }
 
 // 只Cache删除数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：error
 func (c *CacheRow[T]) DelCache(ctx context.Context, condValues []interface{}) (_err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -456,7 +481,7 @@ func (c *CacheRow[T]) DelCache(ctx context.Context, condValues []interface{}) (_
 }
 
 // 只Cache删除数据
-// condValuess：查询条件变量，要和condFields顺序和对应的类型一致
+// condValuess：多个查询条件变量 每个condFields对应的值 顺序和对应的类型要一致
 // 返回值：error
 func (c *CacheRow[T]) DelsCache(ctx context.Context, condValuess ...[]interface{}) (_err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -482,6 +507,7 @@ func (c *CacheRow[T]) DelsCache(ctx context.Context, condValuess ...[]interface{
 
 // 只Cache删除数据
 // condFieldValues：查询条件变量，field:value field必须在c.condFields中都存在
+// 每次先通过数据库查出条件索引来
 // 返回值：error
 func (c *CacheRow[T]) DelAllCache(ctx context.Context, condFieldValues map[string]interface{}) (_err_ error) {
 	var condFields []string
@@ -524,16 +550,16 @@ func (c *CacheRow[T]) DelAllCache(ctx context.Context, condFieldValues map[strin
 }
 
 // 写数据 ctx: CtxKey_NR, CtxKey_NEC
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
-// -     可以是结构或者结构指针，内部的数据是要保存的数据
-// -     data.tags名称需要和T一致，可以是T的一部分
-// -     若data.tags中含有设置的自增字段 或者 条件字段 会忽略掉
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// -     可以是【结构】或者【结构指针】或者【map[string]interface{}】
+// -     结构中tag或者map中的filed的名称需要和T一致，可以是T的一部分
+// -     若其中含有设置的自增字段、condFields，该字段不会修改
 // 返回值
-// _rst_ ： 是T结构类型的指针，修改后的值，含有函【CtxKey_NR】时不返回值
-// _incr_： 自增ID，ctx含有【CtxKey_NEC】时如果新增数据，int64类型
+// _rst_ ： 是T结构类型的指针，修改后的值，设置ops.NoResp()时不返回值 优化性能
+// _incr_： 自增ID，设置ops.Create()时如果新增才返回此值，int64类型
 // _err_ ： 操作失败
-func (c *CacheRow[T]) Set(ctx context.Context, condValues []interface{}, data interface{}) (_rst_ *T, _incr_ interface{}, _err_ error) {
+func (c *CacheRow[T]) Set(ctx context.Context, condValues []interface{}, data interface{}, ops *Options) (_rst_ *T, _incr_ interface{}, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
 		l.Interface(c.condFieldsLog, condValues).Err(_err_).Interface("rst", _rst_).Interface("incr", _incr_).Msg("CacheRow Set")
 	})()
@@ -544,24 +570,24 @@ func (c *CacheRow[T]) Set(ctx context.Context, condValues []interface{}, data in
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.set(ctx, condValues, dataM)
+		return c.set(ctx, condValues, dataM, ops)
 	} else {
 		// 检查data数据
 		dataInfo, err := c.checkStructData(data)
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.set(ctx, condValues, dataInfo.TagElemsMap())
+		return c.set(ctx, condValues, dataInfo.TagElemsMap(), ops)
 	}
 }
 
-func (c *CacheRow[T]) set(ctx context.Context, condValues []interface{}, data map[string]interface{}) (*T, interface{}, error) {
+func (c *CacheRow[T]) set(ctx context.Context, condValues []interface{}, data map[string]interface{}, ops *Options) (*T, interface{}, error) {
 	// 检查条件变量
 	key, err := c.checkCondValuesGenKey(condValues)
 	if err != nil {
 		return nil, nil, err
 	}
-	nr := ctx.Value(CtxKey_NR) != nil
+	nr := ops != nil && ops.noResp
 
 	var dest *T
 	if nr {
@@ -578,7 +604,7 @@ func (c *CacheRow[T]) set(ctx context.Context, condValues []interface{}, data ma
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ctx.Value(CtxKey_NEC) != nil, data, nil))
+	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ops != nil && ops.noExistCreate, data, nil))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -618,8 +644,8 @@ func (c *CacheRow[T]) setSave(ctx context.Context, key string, condValues []inte
 	}()
 
 	// redis参数
-	redisParams := c.redisSetParam(data)
-	cmd := c.redis.DoScript2(ctx, rowSetScript, []string{key}, redisParams...)
+	redisParams := c.redisSetParam("null", data)
+	cmd := c.redis.DoScript2(ctx, rowModifyScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		// 同步mysql
 		mysqlUnlock = true
@@ -656,8 +682,8 @@ func (c *CacheRow[T]) setGetTSave(ctx context.Context, key string, condValues []
 	}()
 
 	// redis参数
-	redisParams := c.redisSetGetParam(c.Tags, data, false)
-	cmd := c.redis.DoScript2(ctx, rowModifyScript, []string{key}, redisParams...)
+	redisParams := c.redisSetGetParam("null", c.Tags, data, false)
+	cmd := c.redis.DoScript2(ctx, rowModifyGetScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		dest := new(T)
 		destInfo, _ := utils.GetStructInfoByStructType(dest, c.StructType)
@@ -688,17 +714,17 @@ func (c *CacheRow[T]) setGetTSave(ctx context.Context, key string, condValues []
 	}
 }
 
-// 增量修改数据 ctx: CtxKey_NR, CtxKey_NEC
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// 增量修改数据
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
-// -     可以是结构或者结构指针，内部的数据是要保存的数据
-// -     data.tags名称需要和T一致，可以是T的一部分
-// -     若data.tags中含有设置的自增字段 或者 条件字段 会忽略掉
+// -     可以是【结构】或者【结构指针】或者【map[string]interface{}】
+// -     结构中tag或者map中的filed的名称需要和T一致，可以是T的一部分
+// -     若其中含有设置的自增字段、condFields，该字段不会修改
 // 返回值
-// _rst_ ： 是T结构类型的指针，修改后的值，含有函【CtxKey_NR】时不返回值
-// _incr_： 自增ID，ctx含有【CtxKey_NEC】时如果新增数据，int64类型
+// _rst_ ： 是T结构类型的指针，修改后的值，设置ops.NoResp()时不返回值 优化性能
+// _incr_： 自增ID，设置ops.Create()时如果新增才返回此值，int64类型
 // _err_ ： 操作失败
-func (c *CacheRow[T]) Modify(ctx context.Context, condValues []interface{}, data interface{}) (_rst_ *T, _incr_ interface{}, _err_ error) {
+func (c *CacheRow[T]) Modify(ctx context.Context, condValues []interface{}, data interface{}, ops *Options) (_rst_ *T, _incr_ interface{}, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
 		l.Interface(c.condFieldsLog, condValues).Err(_err_).Interface("rst", _rst_).Interface("incr", _incr_).Msg("CacheRow Modify")
 	})()
@@ -709,24 +735,24 @@ func (c *CacheRow[T]) Modify(ctx context.Context, condValues []interface{}, data
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.modify(ctx, condValues, dataM)
+		return c.modify(ctx, condValues, dataM, ops)
 	} else {
 		// 检查data数据
 		dataInfo, err := c.checkStructData(data)
 		if err != nil {
 			return nil, nil, err
 		}
-		return c.modify(ctx, condValues, dataInfo.TagElemsMap())
+		return c.modify(ctx, condValues, dataInfo.TagElemsMap(), ops)
 	}
 }
 
-func (c *CacheRow[T]) modify(ctx context.Context, condValues []interface{}, data map[string]interface{}) (*T, interface{}, error) {
+func (c *CacheRow[T]) modify(ctx context.Context, condValues []interface{}, data map[string]interface{}, ops *Options) (*T, interface{}, error) {
 	// 检查条件变量
 	key, err := c.checkCondValuesGenKey(condValues)
 	if err != nil {
 		return nil, nil, err
 	}
-	nr := ctx.Value(CtxKey_NR) != nil
+	nr := ops != nil && ops.noResp
 
 	// 按c.Tags的顺序构造 有顺序
 	modifydata := &ModifyData{data: data}
@@ -754,7 +780,7 @@ func (c *CacheRow[T]) modify(ctx context.Context, condValues []interface{}, data
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ctx.Value(CtxKey_NEC) != nil, data, nil))
+	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ops != nil && ops.noExistCreate, data, nil))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -779,148 +805,117 @@ func (c *CacheRow[T]) modify(ctx context.Context, condValues []interface{}, data
 	}
 }
 
-// 增量修改数据 ctx: CtxKey_NEC
+// 增量修改数据 返回的类型和data一致，填充修改后的值
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
-// -     可以是结构或者结构指针，内部的数据是要保存的数据
-// -     data.tags名称需要和T一致，可以是T的一部分
-// -     若data.tags中含有设置的自增字段 或者 条件字段 会忽略掉
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// -     可以是【结构】或者【结构指针】或者【map[string]interface{}】
+// -     结构中tag或者map中的filed的名称需要和T一致，可以是T的一部分
+// -     若其中含有设置的自增字段、condFields，该字段不会修改
 // 返回值
 // _rst_ ： 是data结构类型的指针，修改后的值
-// _incr_： 自增ID，ctx含有【CtxKey_NEC】时如果新增数据，int64类型
+// _incr_： 自增ID，设置ops.Create()时如果新增才返回此值，int64类型
 // _err_ ： 操作失败
-func (c *CacheRow[T]) Modify2(ctx context.Context, condValues []interface{}, data interface{}) (_rst_ interface{}, _incr_ interface{}, _err_ error) {
+func (c *CacheRow[T]) Modify2(ctx context.Context, condValues []interface{}, data interface{}, ops *Options) (_rst_ interface{}, _incr_ interface{}, _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
 		l.Interface(c.condFieldsLog, condValues).Err(_err_).Interface("rst", _rst_).Interface("incr", _incr_).Msg("CacheRow Modify2")
 	})()
 
-	// 检查条件变量
-	key, err := c.checkCondValuesGenKey(condValues)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 检查data数据
-	dataInfo, err := c.checkStructData(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	dataM := dataInfo.TagElemsMap()
-
-	// 修改后的值
-	res := reflect.New(dataInfo.T).Interface()
-	resInfo, _ := utils.GetStructInfoByTag(res, DBTag)
-
-	// 按c.Tags的顺序构造 有顺序
-	modifydata := &ModifyData{data: dataM}
-	for _, tag := range c.Tags {
-		if v, ok := dataM[tag]; ok {
-			modifydata.tags = append(modifydata.tags, tag)
-			modifydata.values = append(modifydata.values, v)
-			// 填充res对应字段
-			modifydata.rsts = append(modifydata.rsts, resInfo.Elemts[resInfo.FindIndexByTag(tag)])
+	if dataM, ok := data.(map[string]interface{}); ok {
+		// 检查data数据
+		err := c.checkMapData(dataM)
+		if err != nil {
+			return nil, nil, err
 		}
-	}
 
-	// 写数据
-	err = c.modifyGetSave(ctx, key, condValues, modifydata)
-	if err == nil {
-		return res, nil, nil
-	} else if err == ErrNullData {
-		// 不处理执行下面的预加载
+		// 按c.Tags的顺序构造 有顺序
+		modifydata := &ModifyData{data: dataM}
+		for i, tag := range c.Tags {
+			if v, ok := dataM[tag]; ok {
+				modifydata.tags = append(modifydata.tags, tag)
+				modifydata.values = append(modifydata.values, v)
+				// 填充map的值类型，如v=nil 在map中是没有类型的，用c.Fields的
+				if v != nil {
+					modifydata.rsts = append(modifydata.rsts, reflect.New(reflect.TypeOf(v)).Elem())
+				} else {
+					modifydata.rsts = append(modifydata.rsts, reflect.New(c.Fields[i].Type).Elem())
+				}
+			}
+		}
+
+		incrValue, err := c.modify2(ctx, condValues, dataM, modifydata, ops)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return modifydata.TagsRstsMap(), incrValue, nil
 	} else {
-		return nil, nil, err
-	}
+		// 检查data数据
+		dataInfo, err := c.checkStructData(data)
+		if err != nil {
+			return nil, nil, err
+		}
 
-	// 预加载 尝试从数据库中读取
-	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ctx.Value(CtxKey_NEC) != nil, dataM, nil))
-	if err != nil {
-		return nil, nil, err
-	}
-	// 返回了自增，数据添加已经完成了，从预加载数据中拷贝返回值
-	if incrValue != nil {
-		dInfo, _ := utils.GetStructInfoByStructType(preData, c.StructType)
-		CopyTo(dInfo, resInfo)
+		// 修改后的值
+		res := reflect.New(dataInfo.T).Interface()
+		resInfo, _ := utils.GetStructInfoByTag(res, DBTag)
+
+		dataM := dataInfo.TagElemsMap()
+
+		// 按c.Tags的顺序构造 有顺序
+		modifydata := &ModifyData{data: dataM}
+		for _, tag := range c.Tags {
+			if v, ok := dataM[tag]; ok {
+				modifydata.tags = append(modifydata.tags, tag)
+				modifydata.values = append(modifydata.values, v)
+				// 填充res对应字段
+				modifydata.rsts = append(modifydata.rsts, resInfo.Elemts[resInfo.FindIndexByTag(tag)])
+			}
+		}
+
+		incrValue, err := c.modify2(ctx, condValues, dataM, modifydata, ops)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		return res, incrValue, nil
-	}
-
-	// 再次写数据
-	err = c.modifyGetSave(ctx, key, condValues, modifydata)
-	if err == nil {
-		return res, nil, nil
-	} else {
-		return nil, nil, err
 	}
 }
 
-// 增量修改数据 ctx: CtxKey_NEC
-// data：修改内容
-// -     data中key名称需要和T的tag一致，可以是T的一部分
-// -     若data.tags中含有设置的自增字段 或者 条件字段 会忽略掉
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
-// _rst_ ： 是data结构类型map，修改后的值
-// _incr_： 自增ID，ctx含有【CtxKey_NEC】时如果新增数据，int64类型
-// _err_ ： 操作失败
-func (c *CacheRow[T]) ModifyM2(ctx context.Context, condValues []interface{}, data map[string]interface{}) (_rst_ map[string]interface{}, _incr_ interface{}, _err_ error) {
-	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
-		l.Interface(c.condFieldsLog, condValues).Err(_err_).Interface("rst", _rst_).Interface("incr", _incr_).Msg("CacheRow ModifyM2")
-	})()
-
+func (c *CacheRow[T]) modify2(ctx context.Context, condValues []interface{}, data map[string]interface{}, modifydata *ModifyData, ops *Options) (_incr_ interface{}, _err_ error) {
 	// 检查条件变量
 	key, err := c.checkCondValuesGenKey(condValues)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	// 检查data数据
-	err = c.checkMapData(data)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 按c.Tags的顺序构造 有顺序
-	modifydata := &ModifyData{data: data}
-	for i, tag := range c.Tags {
-		if v, ok := data[tag]; ok {
-			modifydata.tags = append(modifydata.tags, tag)
-			modifydata.values = append(modifydata.values, v)
-			// 填充map的值类型，如v=nil 在map中是没有类型的，用c.Fields的
-			if v != nil {
-				modifydata.rsts = append(modifydata.rsts, reflect.New(reflect.TypeOf(v)).Elem())
-			} else {
-				modifydata.rsts = append(modifydata.rsts, reflect.New(c.Fields[i].Type).Elem())
-			}
-		}
+		return nil, err
 	}
 
 	// 写数据
 	err = c.modifyGetSave(ctx, key, condValues, modifydata)
 	if err == nil {
-		return modifydata.TagsRstsMap(), nil, nil
+		return nil, nil
 	} else if err == ErrNullData {
 		// 不处理执行下面的预加载
 	} else {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// 预加载 尝试从数据库中读取
-	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ctx.Value(CtxKey_NEC) != nil, data, nil))
+	preData, incrValue, err := c.preLoad(ctx, key, condValues, utils.If(ops != nil && ops.noExistCreate, data, nil))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	// 返回了自增，数据添加已经完成了，从预加载数据中拷贝返回值
 	if incrValue != nil {
 		dInfo, _ := utils.GetStructInfoByStructType(preData, c.StructType)
 		modifydata.RstsFrom(dInfo)
-		return modifydata.TagsRstsMap(), incrValue, nil
+		return incrValue, nil
 	}
 
 	// 再次写数据
 	err = c.modifyGetSave(ctx, key, condValues, modifydata)
 	if err == nil {
-		return modifydata.TagsRstsMap(), nil, nil
+		return nil, nil
 	} else {
-		return nil, nil, err
+		return nil, err
 	}
 }
 
@@ -940,8 +935,8 @@ func (c *CacheRow[T]) modifyGetSave(ctx context.Context, key string, condValues 
 	}()
 
 	// redis参数
-	redisParams := c.redisSetGetParam(modifydata.tags, modifydata.data, true)
-	cmd := c.redis.DoScript2(ctx, rowModifyScript, []string{key}, redisParams...)
+	redisParams := c.redisSetGetParam("null", modifydata.tags, modifydata.data, true)
+	cmd := c.redis.DoScript2(ctx, rowModifyGetScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		err := cmd.BindValues(modifydata.rsts)
 		if err == nil {
@@ -986,8 +981,8 @@ func (c *CacheRow[T]) modifyGetTSave(ctx context.Context, key string, condValues
 	}()
 
 	// redis参数
-	redisParams := c.redisSetGetParam(c.Tags, modifydata.data, true)
-	cmd := c.redis.DoScript2(ctx, rowModifyScript, []string{key}, redisParams...)
+	redisParams := c.redisSetGetParam("null", c.Tags, modifydata.data, true)
+	cmd := c.redis.DoScript2(ctx, rowModifyGetScript, []string{key}, redisParams...)
 	if cmd.Cmd.Err() == nil {
 		dest := new(T)
 		destInfo, _ := utils.GetStructInfoByStructType(dest, c.StructType)
@@ -1020,6 +1015,12 @@ func (c *CacheRow[T]) modifyGetTSave(ctx context.Context, key string, condValues
 }
 
 func (c *CacheRow[T]) preLoad(ctx context.Context, key string, condValues []interface{}, ncData map[string]interface{}) (*T, interface{}, error) {
+	if ncData == nil {
+		// 如果不想创建 又设置了pass
+		if GetPass(key) {
+			return nil, nil, ErrNullData
+		}
+	}
 	// 加锁
 	unlock, err := c.preLoadLock(ctx, key)
 	if err != nil || unlock == nil {
@@ -1075,8 +1076,20 @@ func (c *CacheRow[T]) preLoad(ctx context.Context, key string, condValues []inte
 // map[string]*T, 如果加锁失败后，会从Redis中直接读取下最新的，这个是和preLoad不一样的地方
 // error： 执行结果
 func (c *CacheRow[T]) preLoads(ctx context.Context, condValuess map[string][]interface{}) (map[string]*T, error) {
-	condValuess2 := make([][]interface{}, 0, len(condValuess))
-	for _, v := range condValuess {
+	// 先判断是否设置了pass
+	queryCondValuess := make(map[string][]interface{}, len(condValuess))
+	for k, v := range condValuess {
+		if GetPass(k) {
+		} else {
+			queryCondValuess[k] = v
+		}
+	}
+	if len(queryCondValuess) == 0 {
+		return make(map[string]*T, 0), nil
+	}
+
+	condValuess2 := make([][]interface{}, 0, len(queryCondValuess))
+	for _, v := range queryCondValuess {
 		condValuess2 = append(condValuess2, v)
 	}
 	t, err := c.getsFromMySQL(ctx, c.T, c.Tags, NewConds().Ins(c.condFields, condValuess2...))
@@ -1114,7 +1127,7 @@ func (c *CacheRow[T]) preLoads(ctx context.Context, condValuess map[string][]int
 			}
 		}
 	}
-	for k := range condValuess {
+	for k := range queryCondValuess {
 		if _, ok := rst[k]; !ok {
 			SetPass(k)
 		}

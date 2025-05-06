@@ -3,15 +3,11 @@ package mrcache
 // https://github.com/yuwf/gobase2
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"gobase/goredis"
 	"gobase/mysql"
-	"gobase/utils"
 	"reflect"
-
-	"github.com/rs/zerolog"
+	"strings"
 )
 
 // T 为数据库结构类型 TF为指定字段类型
@@ -21,6 +17,9 @@ import (
 type CacheColumn[T any, TF any] struct {
 	*Cache
 	TF reflect.Type // TF的reflect类型
+
+	dataValueField      string // 指定查询的字段tag，区分大小写
+	dataValueFieldIndex int    // value在tableInfo中的索引
 }
 
 type CacheColumnData[TF any] struct {
@@ -28,22 +27,36 @@ type CacheColumnData[TF any] struct {
 	Value *TF         // dataValueField
 }
 
-func NewCacheColumn[T any, TF any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string, tableCount, tableIndex int, condFields []string, dataKeyField, dataValueField string) (*CacheColumn[T, TF], error) {
+func NewCacheColumn[T any, TF any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string, tableCount, tableIndex int, condFields, keyFields []string, dataValueField string) (*CacheColumn[T, TF], error) {
 	cache, err := NewCache[T](redis, mysql, tableName, tableCount, tableIndex, condFields)
 	if err != nil {
 		return nil, err
 	}
 	cache.keyPrefix = "mrc"
 
-	dataKeyFieldIndex := cache.FindIndexByTag(dataKeyField)
-	if dataKeyFieldIndex == -1 {
-		err := fmt.Errorf("tag:%s not find in %s", dataKeyField, cache.T.String())
-		return nil, err
+	if len(keyFields) == 0 {
+		return nil, fmt.Errorf("dataKeyFields can not empty in %s", cache.T.String())
 	}
-	if !cache.IsBaseType(dataKeyFieldIndex) {
-		err := fmt.Errorf("tag:%s(%s) as dataKeyField type error", dataKeyField, cache.T.String())
-		return nil, err
+	// 验证dataKeyField 只能是基本的数据int 和 string 类型
+	var keyFields_ []string
+	var keyFieldsIndex_ []int
+	for _, f := range keyFields {
+		idx := cache.FindIndexByTag(f)
+		if idx == -1 {
+			err := fmt.Errorf("tag:%s not find in %s", f, cache.T.String())
+			return nil, err
+		}
+		// 只能是基本的数据int 和 string 类型
+		if !cache.IsBaseType(idx) {
+			err := fmt.Errorf("tag:%s(%s) as keyFields type error", f, cache.T.String())
+			return nil, err
+		}
+		keyFields_ = append(keyFields_, f)
+		keyFieldsIndex_ = append(keyFieldsIndex_, idx)
 	}
+	cache.keyFields = keyFields_
+	cache.keyFieldsIndex = keyFieldsIndex_
+	cache.keyFieldsLog = "[" + strings.Join(keyFields_, ",") + "]"
 
 	// 验证dataValueField是否存在
 	dataValueFieldIndex := cache.FindIndexByTag(dataValueField)
@@ -52,20 +65,18 @@ func NewCacheColumn[T any, TF any](redis *goredis.Redis, mysql *mysql.MySQL, tab
 		return nil, err
 	}
 
-	cache.dataKeyField = dataKeyField
-	cache.dataKeyFieldIndex = dataKeyFieldIndex
-	cache.dataValueField = dataValueField
-	cache.dataValueFieldIndex = dataValueFieldIndex
-
 	c := &CacheColumn[T, TF]{
-		Cache: cache,
-		TF:    reflect.TypeOf((*TF)(nil)).Elem(),
+		Cache:               cache,
+		TF:                  reflect.TypeOf((*TF)(nil)).Elem(),
+		dataValueField:      dataValueField,
+		dataValueFieldIndex: dataValueFieldIndex,
 	}
 	return c, nil
 }
 
+/* 需要照着CacheRows改造下才能使用功能 去掉了dataKeyField
 // 读取数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：dataKeyValue:dataValueValue
 func (c *CacheColumn[T, TF]) GetAll(ctx context.Context, condValues []interface{}) (_rst_ []*CacheColumnData[TF], _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -93,7 +104,7 @@ func (c *CacheColumn[T, TF]) GetAll(ctx context.Context, condValues []interface{
 }
 
 // 读取一条数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：列表
 func (c *CacheColumn[T, TF]) Gets(ctx context.Context, condValues []interface{}, dataKeyValues []interface{}) (_rst_ []*CacheColumnData[TF], _err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -108,7 +119,7 @@ func (c *CacheColumn[T, TF]) Gets(ctx context.Context, condValues []interface{},
 
 	// 检测 dataKeyValue的类型和值
 	for _, dataKeyValue := range dataKeyValues {
-		err := c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+		err := c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 		if err != nil {
 			return nil, err
 		}
@@ -169,7 +180,7 @@ func (c *CacheColumn[T, TF]) gets(ctx context.Context, key string, condValues []
 }
 
 // 读取一条数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // dataKeyValue：数据key的值
 // 返回值：是T结构类型的指针列表
 func (c *CacheColumn[T, TF]) Get(ctx context.Context, condValues []interface{}, dataKeyValue interface{}) (_rst_ *TF, _err_ error) {
@@ -184,7 +195,7 @@ func (c *CacheColumn[T, TF]) Get(ctx context.Context, condValues []interface{}, 
 	}
 
 	// 数据key的类型和值
-	err = c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+	err = c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +241,7 @@ func (c *CacheColumn[T, TF]) get(ctx context.Context, key string, condValues []i
 }
 
 // 读取数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // dataKeyValue：数据key的值
 // 返回值：是否存在
 func (c *CacheColumn[T, TF]) Exist(ctx context.Context, condValues []interface{}, dataKeyValue interface{}) (_rst_ bool, _err_ error) {
@@ -245,7 +256,7 @@ func (c *CacheColumn[T, TF]) Exist(ctx context.Context, condValues []interface{}
 	}
 
 	// 数据key的类型和值
-	err = c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+	err = c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 	if err != nil {
 		return false, err
 	}
@@ -286,7 +297,7 @@ func (c *CacheColumn[T, TF]) Exist(ctx context.Context, condValues []interface{}
 }
 
 // 添加数据，需要外部已经确保没有数据了调用此函数，直接添加数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
 // 返回值
 // _incr_： 自增ID，int64类型
@@ -319,7 +330,7 @@ func (c *CacheColumn[T, TF]) Add(ctx context.Context, condValues []interface{}, 
 }
 
 // 删除全部数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：error
 func (c *CacheColumn[T, TF]) DelAll(ctx context.Context, condValues []interface{}) (_err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -346,7 +357,7 @@ func (c *CacheColumn[T, TF]) DelAll(ctx context.Context, condValues []interface{
 }
 
 // 删除数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // dataKeyValue：数据key的值
 // 返回值：error
 func (c *CacheColumn[T, TF]) Del(ctx context.Context, condValues []interface{}, dataKeyValue interface{}) (_err_ error) {
@@ -361,7 +372,7 @@ func (c *CacheColumn[T, TF]) Del(ctx context.Context, condValues []interface{}, 
 	}
 
 	// 数据key的类型和值
-	err = c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+	err = c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 	if err != nil {
 		return err
 	}
@@ -380,7 +391,7 @@ func (c *CacheColumn[T, TF]) Del(ctx context.Context, condValues []interface{}, 
 }
 
 // 只Cache删除数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // 返回值：error
 func (c *CacheColumn[T, TF]) DelAllCache(ctx context.Context, condValues []interface{}) (_err_ error) {
 	defer c.logContext(&ctx, &_err_, func(l *zerolog.Event) {
@@ -401,7 +412,7 @@ func (c *CacheColumn[T, TF]) DelAllCache(ctx context.Context, condValues []inter
 }
 
 // 只Cache删除数据
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // dataKeyValue：数据key的值
 // 返回值：error
 func (c *CacheColumn[T, TF]) DelCache(ctx context.Context, condValues []interface{}, dataKeyValue interface{}) (_err_ error) {
@@ -416,7 +427,7 @@ func (c *CacheColumn[T, TF]) DelCache(ctx context.Context, condValues []interfac
 	}
 
 	// 数据key的类型和值
-	err = c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+	err = c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 	if err != nil {
 		return err
 	}
@@ -429,7 +440,7 @@ func (c *CacheColumn[T, TF]) DelCache(ctx context.Context, condValues []interfac
 }
 
 // 写数据 ctx: CtxKey_NEC
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致
 // data：修改内容
 // -     可以是结构或者结构指针，内部的数据是要保存的数据
 // -     data.tags名称需要和T一致，可以是T的一部分
@@ -449,7 +460,7 @@ func (c *CacheColumn[T, TF]) Set(ctx context.Context, condValues []interface{}, 
 	}
 
 	// 数据key的类型和值
-	err = c.checkValue(c.dataKeyFieldIndex, dataKeyValue)
+	err = c.checkFiledValue(c.dataKeyFieldIndex, dataKeyValue)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +541,7 @@ func (c *CacheColumn[T, TF]) setSave(ctx context.Context, key string, condValues
 
 // 预加载多条数据，确保写到Redis中
 // key：主key
-// condValues：查询条件变量，要和condFields顺序和对应的类型一致值
+// condValues：查询条件变量 condFields对应的值 顺序和对应的类型要一致值
 // dataKeyValues 要加在的数据key
 // 返回值
 // *TF： 因为preLoadLock是加锁失败等待，!= nil 表示是本逻辑执行了加载，否则没有执行加载
@@ -645,3 +656,4 @@ func (c *CacheColumn[T, TF]) preLoad(ctx context.Context, key string, condValues
 	}
 	return data, incrValue, nil
 }
+*/

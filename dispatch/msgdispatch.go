@@ -189,7 +189,7 @@ func getFuncName(fun reflect.Value) (string, string) {
 		funName = slice[len(slice)-1]
 	}
 	if len(shortSlice) > 0 {
-		funNameShort = shortSlice[len(slice)-1]
+		funNameShort = shortSlice[len(shortSlice)-1]
 	}
 	return funName, funNameShort
 }

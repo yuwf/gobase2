@@ -35,13 +35,10 @@ type Cache struct {
 	condFieldsIndex []int    // condFields对应的索引
 	condFieldsLog   string   // log时专用
 
-	// CacheRows、CacheColumn使用
-	dataKeyField      string // 查询结果中唯一的字段tag，用来做key，区分大小写
-	dataKeyFieldIndex int    // key在tableInfo中的索引
-
-	// CacheColumn使用
-	dataValueField      string // 指定查询的字段tag，区分大小写
-	dataValueFieldIndex int    // value在tableInfo中的索引
+	// CacheRows使用
+	keyFields      []string // 查询结果中唯一的字段tag，用来做key，区分大小写
+	keyFieldsIndex []int    // dataKeyField在tableInfo中的索引
+	keyFieldsLog   string   // log时专用
 
 	// 其他配置参数
 	// 生成key时的hasgtag
@@ -62,8 +59,8 @@ type Cache struct {
 
 	queryCond TableConds // 查找数据总过滤条件
 
-	lock         bool                // 同步数据锁保护
-	toMysqlAsync bool                // 异步保存到mysql
+	lock         bool // 同步数据锁保护
+	toMysqlAsync bool // 异步保存到mysql
 }
 
 func NewCache[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string, tableCount, tableIndex int, condFields []string) (*Cache, error) {
@@ -73,7 +70,7 @@ func NewCache[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string,
 	}
 	// 检查条件字段是否合理
 	if len(condFields) == 0 {
-		return nil, fmt.Errorf("condField can not empty in %s", table.T.String())
+		return nil, fmt.Errorf("condFields can not empty in %s", table.T.String())
 	}
 	var condFields_ []string
 	var condFieldsIndex []int
@@ -87,7 +84,6 @@ func NewCache[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string,
 			err := fmt.Errorf("tag:%s(%s) type error", f, table.T.String())
 			return nil, err
 		}
-
 		condFields_ = append(condFields_, f)
 		condFieldsIndex = append(condFieldsIndex, idx)
 	}
@@ -116,6 +112,14 @@ func NewCache[T any](redis *goredis.Redis, mysql *mysql.MySQL, tableName string,
 		c.tableCount = 0
 	}
 	return c, nil
+}
+
+func (c *Cache) Redis() *goredis.Redis {
+	return c.redis
+}
+
+func (c *Cache) MySQL() *mysql.MySQL {
+	return c.mysql
 }
 
 // 配置redishashtag，tag必须在c.condFields存在
@@ -204,24 +208,24 @@ func (c *Cache) logContext(ctx *context.Context, _err_ *error, fun func(l *zerol
 	}
 }
 
-func (c *Cache) checkValue(at int, v interface{}) error {
+func (c *Cache) checkFiledValue(at int, v interface{}) error {
 	elemType := c.Fields[at].Type
 	if v == nil {
-		err := fmt.Errorf("value type is nil at tag:%s, should be %s", c.condFields[at], elemType.String())
+		err := fmt.Errorf("value type is nil at tag:%s, should be %s", c.Tags[at], elemType.String())
 		return err
 	}
 	actualType := reflect.TypeOf(v)
 	if !(elemType == actualType || (elemType.Kind() == reflect.Pointer && elemType.Elem() == actualType)) {
-		err := fmt.Errorf("value type is invalid at tag:%s(%s), should be %s", c.condFields[at], actualType.String(), elemType.String())
+		err := fmt.Errorf("value type is invalid at tag:%s(%s), should be %s", c.Tags[at], actualType.String(), elemType.String())
 		return err
 	}
 	return nil
 }
 
-func (c *Cache) checkValueType(at int, actualType reflect.Type) error {
+func (c *Cache) checkFiledType(at int, actualType reflect.Type) error {
 	elemType := c.Fields[at].Type
 	if !(elemType == actualType || (elemType.Kind() == reflect.Pointer && elemType.Elem() == actualType)) {
-		err := fmt.Errorf("value type is invalid at tag:%s(%s), should be %s", c.condFields[at], actualType.String(), elemType.String())
+		err := fmt.Errorf("value type is invalid at tag:%s(%s), should be %s", c.Tags[at], actualType.String(), elemType.String())
 		return err
 	}
 	return nil
@@ -235,7 +239,23 @@ func (c *Cache) checkCondValues(condValues []interface{}) error {
 	for i, v := range condValues {
 		// v必须有效 且类型要和T类型对应的字段类型一致
 		at := c.condFieldsIndex[i]
-		err := c.checkValue(at, v)
+		err := c.checkFiledValue(at, v)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// 检查keyValues是否合法
+func (c *Cache) checkKeyValues(keyValues []interface{}) error {
+	if len(keyValues) != len(c.keyFields) {
+		return errors.New("keyValues size not match keyFields")
+	}
+	for i, v := range keyValues {
+		// v必须有效 且类型要和T类型对应的字段类型一致
+		at := c.keyFieldsIndex[i]
+		err := c.checkFiledValue(at, v)
 		if err != nil {
 			return err
 		}
@@ -274,20 +294,17 @@ func (c *Cache) checkCondFieldValues(condFieldValues map[string]interface{}) ([]
 	return condFields, condValues, nil
 }
 
-// 生成key，不检查condValues，需要调用的地方保证参数
+// 生成key，不检查condValues是否符合condFields，需要调用的地方保证参数
 // key的命名: [keyPrefix_]表名[:dataValueField][_keySuffix]_{condValue1}_condValue2  []内的是根据配置来生成
 // CacheColumn缓存会设置dataValueField，key中添加上:dataValueField
 // hashTagField == condField时 condValue1会添加上{}
 func (c *Cache) genCondValuesKey(condValues []interface{}) string {
 	var key strings.Builder
-	key.Grow(len(c.keyPrefix) + 1 + len(c.tableName) + 1 + len(c.dataValueField) + 1 + len(c.keySuffix) + len(condValues)*20) // 预估一个大小
+	key.Grow(len(c.keyPrefix) + 1 + len(c.tableName) + 1 + 1 + len(c.keySuffix) + len(condValues)*20) // 预估一个大小
 	if len(c.keyPrefix) > 0 {
 		key.WriteString(c.keyPrefix + "_")
 	}
 	key.WriteString(c.tableName)
-	if len(c.dataValueField) > 0 {
-		key.WriteString(":" + c.dataValueField)
-	}
 	if len(c.keySuffix) > 0 {
 		key.WriteString("_" + c.keySuffix)
 	}
@@ -301,6 +318,19 @@ func (c *Cache) genCondValuesKey(condValues []interface{}) string {
 	return key.String()
 }
 
+// 生成keyValuesStr，不检查keyValues是否符合keyFields，需要调用的地方保证参数
+func (c *Cache) genKeyValuesStr(keyValues []interface{}) string {
+	var flag strings.Builder
+	for i, v := range keyValues {
+		if i > 0 {
+			flag.WriteByte(':')
+		}
+		flag.WriteString(c.fmtBaseType(v))
+	}
+	return flag.String()
+}
+
+// 判断condValues是否符合condFileds，并生成key
 func (c *Cache) checkCondValuesGenKey(condValues []interface{}) (string, error) {
 	err := c.checkCondValues(condValues)
 	if err != nil {
@@ -309,7 +339,34 @@ func (c *Cache) checkCondValuesGenKey(condValues []interface{}) (string, error) 
 	return c.genCondValuesKey(condValues), nil
 }
 
-// 检查结构数据
+// 判断keyValues是否符合keyFileds,并生成keyValuesStr
+func (c *Cache) checkKeyValuesGenStr(keyValues []interface{}) (string, error) {
+	err := c.checkKeyValues(keyValues)
+	if err != nil {
+		return "", err
+	}
+	return c.genKeyValuesStr(keyValues), nil
+}
+
+// 判断从data中去的数据是否符合keyFileds,并生成keyValuesStr
+func (c *Cache) checkKeyValuesGenStrByMap(data map[string]interface{}) (string, []interface{}, error) {
+	var keyValues []interface{}
+	for _, f := range c.keyFields {
+		v, ok := data[f]
+		if !ok {
+			err := fmt.Errorf("not find %s field", f)
+			return "", nil, err
+		}
+		keyValues = append(keyValues, v)
+	}
+	err := c.checkKeyValues(keyValues)
+	if err != nil {
+		return "", nil, err
+	}
+	return c.genKeyValuesStr(keyValues), keyValues, nil
+}
+
+// 检查结构数据 是否为c.Tags的一部分
 // 可以是结构或者结构指针 data.tags名称需要和T一致，可以是T的一部分
 // 如果合理 返回data的结构信息
 func (c *Cache) checkStructData(data interface{}) (*utils.StructValue, error) {
@@ -324,7 +381,7 @@ func (c *Cache) checkStructData(data interface{}) (*utils.StructValue, error) {
 			err := fmt.Errorf("tag:%s not find in %s", tag, c.T.String())
 			return nil, err
 		}
-		err := c.checkValueType(at, dataInfo.Fields[i].Type)
+		err := c.checkFiledType(at, dataInfo.Fields[i].Type)
 		if err != nil {
 			return nil, err
 		}
@@ -332,7 +389,7 @@ func (c *Cache) checkStructData(data interface{}) (*utils.StructValue, error) {
 	return dataInfo, nil
 }
 
-// 检查Map数据
+// 检查Map数据 是否为c.Tags的一部分
 func (c *Cache) checkMapData(data map[string]interface{}) error {
 	// 结构中的字段必须都存在，且类型还要一致
 	for tag, v := range data {
@@ -343,7 +400,7 @@ func (c *Cache) checkMapData(data map[string]interface{}) error {
 		}
 		vt := reflect.TypeOf(v)
 		if v != nil { // 空set时表示删除
-			err := c.checkValueType(at, vt)
+			err := c.checkFiledType(at, vt)
 			if err != nil {
 				return err
 			}
@@ -479,7 +536,7 @@ func (c *Cache) delToMySQL(ctx context.Context, cond TableConds) error {
 	return nil
 }
 
-// 读取mysql数据 返回的是 *T
+// 读取mysql数据 返回的是 *T 会返回空错误
 // fields表示读取的字段名，内部为string类型
 func (c *Cache) getFromMySQL(ctx context.Context, T reflect.Type, fields []string, cond TableConds) (interface{}, error) {
 	var sqlStr strings.Builder
@@ -512,7 +569,7 @@ func (c *Cache) getFromMySQL(ctx context.Context, T reflect.Type, fields []strin
 	return t.Interface(), nil
 }
 
-// 读取mysql数据 返回的是 []*T
+// 读取mysql数据 返回的是 []*T  不会返回空错误
 // fields表示读取的字段名，内部为string类型
 func (c *Cache) getsFromMySQL(ctx context.Context, T reflect.Type, fields []string, cond TableConds) (interface{}, error) {
 	var sqlStr strings.Builder
@@ -629,15 +686,17 @@ func (c *Cache) saveIgnoreTag(tag string) bool {
 	if utils.Contains(c.condFields, tag) {
 		return true // 忽略条件字段
 	}
-	if tag == c.dataKeyField {
-		return true // 忽略数据字段
+	if utils.Contains(c.keyFields, tag) {
+		return true // 忽略条件字段
 	}
 	return false
 }
 
-func (c *Cache) redisSetParam(data map[string]interface{}) []interface{} {
-	redisParams := make([]interface{}, 0, 1+len(c.Tags)*3)
+// params参数放到过期时间后面
+func (c *Cache) redisSetParam(param string, data map[string]interface{}) []interface{} {
+	redisParams := make([]interface{}, 0, 2+len(c.Tags)*3)
 	redisParams = append(redisParams, c.expire)
+	redisParams = append(redisParams, param)
 	for tag, v := range data {
 		if c.saveIgnoreTag(tag) {
 			continue
@@ -655,9 +714,12 @@ func (c *Cache) redisSetParam(data map[string]interface{}) []interface{} {
 	return redisParams
 }
 
-func (c *Cache) redisSetGetParam(tags []string, data map[string]interface{}, numIncr bool) []interface{} {
-	redisParams := make([]interface{}, 0, 1+len(c.Tags)*3)
+// params参数放到过期时间后面
+// tags 表示填充data时 按tags来填充
+func (c *Cache) redisSetGetParam(param string, tags []string, data map[string]interface{}, numIncr bool) []interface{} {
+	redisParams := make([]interface{}, 0, 2+len(c.Tags)*3)
 	redisParams = append(redisParams, c.expire)
+	redisParams = append(redisParams, param)
 	for _, tag := range tags {
 		redisParams = append(redisParams, c.GetRedisTagByTag(tag)) // 真实填充的是redistag
 		if c.saveIgnoreTag(tag) {

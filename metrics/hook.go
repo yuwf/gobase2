@@ -178,9 +178,9 @@ func goredisHook(ctx context.Context, cmd *goredis.RedisCommond) {
 		}
 
 		callerName := ""
-		caller, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
-		if ok {
-			callerName = caller.Name()
+		callers, ok := ctx.Value(utils.CtxKey_callers).([]*utils.CallerDesc)
+		if ok && len(callers) > 0 {
+			callerName = callers[0].Name()
 		}
 
 		//redisCnt.WithLabelValues(cmdName, key, callerName).Inc()
@@ -212,9 +212,9 @@ func mysqlHook(ctx context.Context, cmd *mysql.MySQLCommond) {
 	})
 
 	callerName := ""
-	caller, ok := ctx.Value(utils.CtxKey_caller).(*utils.CallerDesc)
-	if ok {
-		callerName = caller.Name()
+	callers, ok := ctx.Value(utils.CtxKey_callers).([]*utils.CallerDesc)
+	if ok && len(callers) > 0 {
+		callerName = callers[0].Name()
 	}
 
 	//mysqlCnt.WithLabelValues(strings.ToUpper(cmd.Cmd), callerName).Inc()
