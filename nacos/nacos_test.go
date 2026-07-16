@@ -1,7 +1,9 @@
 package nacos
 
 import (
+	"context"
 	"gobase/loader"
+	"gobase/utils"
 	"testing"
 	"time"
 
@@ -236,8 +238,8 @@ func BenchmarkListenService(b *testing.B) {
 	//log.Info().Strs("serviceNames", serviceNames).Msg("GetAllServicesInfo")
 	//regs, _ := defaultClient.SelectInstances("sname1", "gname", []string{"a"})
 	//log.Info().Interface("regs", regs).Msg("SelectInstances")
-	defaultClient.ListenService("sname", "gname", []string{""}, func(infos []*RegistryInfo) {
-		log.Info().Interface("infos", infos).Msg("Regs")
+	defaultClient.ListenService("sname", "gname", []string{""}, func(ctx context.Context, infos []*RegistryInfo) {
+		utils.LogCtx(log.Info(), ctx).Interface("infos", infos).Msg("Regs")
 	})
 	time.Sleep(time.Hour)
 }
@@ -253,9 +255,9 @@ func BenchmarkListenService2(b *testing.B) {
 	if err != nil {
 		return
 	}
-	defaultClient.ListenService2("sname1", "gname", []string{"a"}, func(addInfos, delInfos []*RegistryInfo) {
-		log.Info().Interface("regs", addInfos).Msg("Add")
-		log.Info().Interface("regs", delInfos).Msg("Del")
+	defaultClient.ListenService2("sname1", "gname", []string{"a"}, func(ctx context.Context, addInfos, delInfos []*RegistryInfo) {
+		utils.LogCtx(log.Info(), ctx).Interface("regs", addInfos).Msg("Add")
+		utils.LogCtx(log.Info(), ctx).Interface("regs", delInfos).Msg("Del")
 	})
 	time.Sleep(time.Hour)
 }
@@ -271,8 +273,8 @@ func BenchmarkListenServices(b *testing.B) {
 	if err != nil {
 		return
 	}
-	defaultClient.ListenServices([]string{"sname1", "sname2"}, "gname", []string{"a"}, func(infos []*RegistryInfo) {
-		log.Info().Interface("infos", infos).Msg("Regs")
+	defaultClient.ListenServices([]string{"sname1", "sname2"}, "gname", []string{"a"}, func(ctx context.Context, infos []*RegistryInfo) {
+		utils.LogCtx(log.Info(), ctx).Interface("infos", infos).Msg("Regs")
 	})
 	time.Sleep(time.Hour)
 }
@@ -288,9 +290,9 @@ func BenchmarkListenServices2(b *testing.B) {
 	if err != nil {
 		return
 	}
-	defaultClient.ListenServices2([]string{"sname1", "sname2"}, "gname", []string{"a"}, func(addInfos, delInfos []*RegistryInfo) {
-		log.Info().Interface("regs", addInfos).Msg("Add")
-		log.Info().Interface("regs", delInfos).Msg("Del")
+	defaultClient.ListenServices2([]string{"sname1", "sname2"}, "gname", []string{"a"}, func(ctx context.Context, addInfos, delInfos []*RegistryInfo) {
+		utils.LogCtx(log.Info(), ctx).Interface("regs", addInfos).Msg("Add")
+		utils.LogCtx(log.Info(), ctx).Interface("regs", delInfos).Msg("Del")
 	})
 	time.Sleep(time.Hour)
 }

@@ -3,6 +3,7 @@ package backend
 // https://github.com/yuwf/gobase2
 
 import (
+	"context"
 	"gobase/consul"
 	"gobase/goredis"
 	"gobase/msger"
@@ -88,10 +89,10 @@ func NewTcpBackendWithConsul[ServiceInfo any, Msg any](consulAddr, tag string, e
 	tb.watcher = watcher
 
 	// 服务发现部分
-	watcher.WatchServices(tag, func(infos []*consul.RegistryInfo) {
+	watcher.WatchServices(tag, func(ctx context.Context, infos []*consul.RegistryInfo) {
 		if tb.event != nil {
 			confs := tb.event.ConsulFilter(infos)
-			tb.UpdateServices(confs)
+			tb.UpdateServices(ctx, confs)
 		}
 	})
 	return tb, nil
@@ -107,10 +108,10 @@ func NewTcpBackendWithNacos[ServiceInfo any, Msg any](nacosCli *nacos.Client, se
 	tb.watcher = nacosCli
 
 	// 服务发现部分
-	nacosCli.ListenServices(serviceNames, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+	nacosCli.ListenServices(serviceNames, groupName, clusters, func(ctx context.Context, infos []*nacos.RegistryInfo) {
 		if tb.event != nil {
 			confs := tb.event.NacosFilter(infos)
-			tb.UpdateServices(confs)
+			tb.UpdateServices(ctx, confs)
 		}
 	})
 	return tb, nil
@@ -130,10 +131,10 @@ func NewTcpBackendWithGoRedis[ServiceInfo any, Msg any](cfg *goredis.Config, key
 	tb.watcher = watcher
 
 	// 服务发现部分
-	watcher.WatchServices(key, serverNames, func(infos []*goredis.RegistryInfo) {
+	watcher.WatchServices(key, serverNames, func(ctx context.Context, infos []*goredis.RegistryInfo) {
 		if tb.event != nil {
 			confs := tb.event.GoRedisFilter(infos)
-			tb.UpdateServices(confs)
+			tb.UpdateServices(ctx, confs)
 		}
 	})
 	return tb, nil
@@ -157,10 +158,10 @@ func NewHttpBackendWithConsul[ServiceInfo any](consulAddr, tag string, event Htt
 	}
 	hb := NewHttpBackend[ServiceInfo](event, watcher)
 	// 服务发现部分
-	watcher.WatchServices(tag, func(infos []*consul.RegistryInfo) {
+	watcher.WatchServices(tag, func(ctx context.Context, infos []*consul.RegistryInfo) {
 		if hb.event != nil {
 			confs := hb.event.ConsulFilter(infos)
-			hb.updateServices(confs)
+			hb.updateServices(ctx, confs)
 		}
 	})
 	return hb, nil
@@ -173,10 +174,10 @@ func NewHttpBackendWithGoRedis[ServiceInfo any](cfg *goredis.Config, key string,
 	}
 	hb := NewHttpBackend[ServiceInfo](event, watcher)
 	// 服务发现部分
-	watcher.WatchServices(key, serverNames, func(infos []*goredis.RegistryInfo) {
+	watcher.WatchServices(key, serverNames, func(ctx context.Context, infos []*goredis.RegistryInfo) {
 		if hb.event != nil {
 			confs := hb.event.GoRedisFilter(infos)
-			hb.updateServices(confs)
+			hb.updateServices(ctx, confs)
 		}
 	})
 	return hb, nil
@@ -186,10 +187,10 @@ func NewHttpBackendWithGoRedis[ServiceInfo any](cfg *goredis.Config, key string,
 func NewHttpBackendWithNacos[ServiceInfo any](nacosCli *nacos.Client, serviceName, groupName string, clusters []string, event HttpEvent[ServiceInfo]) (*HttpBackend[ServiceInfo], error) {
 	hb := NewHttpBackend[ServiceInfo](event, nacosCli)
 	// 服务发现部分
-	nacosCli.ListenService(serviceName, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+	nacosCli.ListenService(serviceName, groupName, clusters, func(ctx context.Context, infos []*nacos.RegistryInfo) {
 		if hb.event != nil {
 			confs := hb.event.NacosFilter(infos)
-			hb.updateServices(confs)
+			hb.updateServices(ctx, confs)
 		}
 	})
 	return hb, nil
@@ -197,10 +198,10 @@ func NewHttpBackendWithNacos[ServiceInfo any](nacosCli *nacos.Client, serviceNam
 func NewHttpBackendWithNacos2[ServiceInfo any](nacosCli *nacos.Client, serviceNames []string, groupName string, clusters []string, event HttpEvent[ServiceInfo]) (*HttpBackend[ServiceInfo], error) {
 	hb := NewHttpBackend[ServiceInfo](event, nacosCli)
 	// 服务发现部分
-	nacosCli.ListenServices(serviceNames, groupName, clusters, func(infos []*nacos.RegistryInfo) {
+	nacosCli.ListenServices(serviceNames, groupName, clusters, func(ctx context.Context, infos []*nacos.RegistryInfo) {
 		if hb.event != nil {
 			confs := hb.event.NacosFilter(infos)
-			hb.updateServices(confs)
+			hb.updateServices(ctx, confs)
 		}
 	})
 	return hb, nil
